@@ -1,0 +1,21 @@
+[DEFAULT]
+SERVERNAME = localhost
+USERNAME = root
+PASSWORD = your_password_here
+PORT = 3306
+DATABASE = pos_db
+OUTLET = OUTLET_CODE
+CHARSET = utf8
+
+[MAIL]
+SENDER = your_email@gmail.com
+PASSWORD = your_app_password_here
+RECEIVER = recipient@example.com
+CC = recipient@example.com
+SMTPSERVER = smtp.gmail.com
+SMTPPORT = 465
+ 
+[APP]
+AUTO_LOGIN = False
+LOG_LEVEL = INFO
+REPORT_FORMAT = txt 
