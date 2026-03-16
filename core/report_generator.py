@@ -45,7 +45,14 @@ class ReportGenerator:
             # Header
             f.write("Consolidate Sale".center(35))
             
-            currentdate_head = datetime.datetime.strptime(currentdate, '%Y-%m-%d').strftime('%d %B %Y')
+            MONTHS = [
+                "January","February","March","April","May","June",
+                "July","August","September","October","November","December"
+            ]
+
+            date_obj = datetime.datetime.strptime(currentdate, '%Y-%m-%d')
+            currentdate_head = f"{date_obj.day} {MONTHS[date_obj.month-1]} {date_obj.year}"
+            
             endtime = "End Time " + datetime.datetime.now().strftime('%H:%M:%S')
             
             f.write("\n" + currentdate_head.center(35) + "\n")

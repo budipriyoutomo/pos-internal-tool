@@ -1,4 +1,14 @@
 # core/database.py
+import os 
+import locale 
+
+os.environ["LC_ALL"] = "en_US.UTF-8"
+os.environ["LANG"] = "en_US.UTF-8"
+
+try:
+    locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+except:
+    pass
 import mysql.connector
 from mysql.connector import Error
 from config.settings import settings
@@ -59,3 +69,18 @@ class TransactionData:
     def get_takeaway(saledate):
         with DatabaseConnection() as db:
             return db.execute_query("SELECT * FROM bsum_menu WHERE saledate = %s AND salemode = 2", (saledate,))
+     
+    @staticmethod
+    def get_detail_menu(saledate):
+        """Get detail menu for API"""
+        query = "SELECT * FROM detail_menu WHERE saledate = %s"
+        with DatabaseConnection() as db:
+            return db.execute_query(query, (saledate,))
+        
+    @staticmethod
+    def get_detail_menu_columns():
+        """Get column names for detail_menu table"""
+        query = "SHOW COLUMNS FROM detail_menu"
+        with DatabaseConnection() as db:
+            columns = db.execute_query(query)
+            return [col[0] for col in columns]   
