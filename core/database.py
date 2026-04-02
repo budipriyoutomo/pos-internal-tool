@@ -54,6 +54,31 @@ class DatabaseConnection:
             if cursor:
                 cursor.close()
 
+    def execute_query_dict(self, query, params=None):
+        cursor = None
+        try:
+            if not self.connection:
+                self.connect()
+            
+            cursor = self.connection.cursor()
+            cursor.execute(query, params or ())
+            
+            if query.strip().upper().startswith('SELECT'):
+                columns = [col[0] for col in cursor.description]
+                
+                result = []
+                for row in cursor.fetchall():
+                    result.append(dict(zip(columns, row)))
+                
+                return result
+            else:
+                self.connection.commit()
+                return cursor.rowcount
+
+        finally:
+            if cursor:
+                cursor.close()
+                
 class TransactionData:
     @staticmethod
     def get_transactions(saledate):
@@ -69,18 +94,26 @@ class TransactionData:
     def get_takeaway(saledate):
         with DatabaseConnection() as db:
             return db.execute_query("SELECT * FROM bsum_menu WHERE saledate = %s AND salemode = 2", (saledate,))
-     
-    @staticmethod
-    def get_detail_menu(saledate):
-        """Get detail menu for API"""
-        query = "SELECT * FROM detail_menu WHERE saledate = %s"
-        with DatabaseConnection() as db:
-            return db.execute_query(query, (saledate,))
         
     @staticmethod
-    def get_detail_menu_columns():
-        """Get column names for detail_menu table"""
-        query = "SHOW COLUMNS FROM detail_menu"
+    def get_sales_header(last_id, saledate):
+        query = """
+            SELECT *
+            FROM vw_ordertransaction
+            WHERE TransactionID > %s AND saledate = %s 
+        """
         with DatabaseConnection() as db:
-            columns = db.execute_query(query)
-            return [col[0] for col in columns]   
+            return db.execute_query_dict(query, (last_id, saledate))
+
+    @staticmethod
+    def get_sales_detail(transaction_ids):
+        format_ids = ",".join(str(i) for i in transaction_ids)
+
+        query = f"""
+            SELECT *
+            FROM vw_orderdetail
+            WHERE TransactionID IN ({format_ids})
+        """
+
+        with DatabaseConnection() as db:
+            return db.execute_query_dict(query)

@@ -4,13 +4,14 @@ Promise POS Internal Tool
 Main application entry point
 """
 
-# ==================== IMPORTS ==================== 
+# ==================== IMPORTS ====================  
 import sys
 import os
 import locale
+from queue_db import init_db 
 
-print(locale.getdefaultlocale())
-print(locale.getlocale())
+init_db()  # pastikan database queue siap
+
 os.environ["LC_ALL"] = "en_US.UTF-8"
 os.environ["LANG"] = "en_US.UTF-8"
 
@@ -288,10 +289,12 @@ Shortcut:
         except Exception as e:
             print(f"Error during shutdown: {e}")
             self.destroy()
+    
+ 
 
 # ==================== ENTRY POINT ====================
 if __name__ == "__main__":
-    try:
+    try:   
         # Print startup info
         print("="*60)
         print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION}")
@@ -303,9 +306,9 @@ if __name__ == "__main__":
         print("="*60)
         
         # Create and run app
-        app = PromisePOSApp()
+        app = PromisePOSApp() 
         app.mainloop()
-        
+
     except KeyboardInterrupt:
         print("\n👋 Application terminated by user")
     except Exception as e:

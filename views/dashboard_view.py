@@ -15,199 +15,220 @@ class DashboardView(tk.Frame):
         self.controller = DashboardController(self)
         self.colors = settings.THEME_COLORS
         
+        # Fallbacks for new theme keys in case they missed
+        self.text_color = self.colors.get('text', '#1f2937')
+        self.border_color = self.colors.get('border', '#e5e7eb')
+        
+        # Font settings for modern look
+        self.font_family = 'Segoe UI' if self._is_windows() else 'Helvetica'
+        
         # Variables
         self.date_var = tk.StringVar(value=datetime.datetime.now().strftime('%Y-%m-%d'))
         self.is_processing = False  # Flag untuk menandai proses sedang berjalan
         
         # Setup UI
         self.setup_ui()
+        
+    def _is_windows(self):
+        import platform
+        return platform.system() == 'Windows'
     
     def setup_ui(self):
         self.configure(bg=self.colors['light'])
         self.pack(fill=tk.BOTH, expand=True)
         
-        # Header
-        header = tk.Frame(self, bg=self.colors['primary'], height=80)
+        # Header (Modern flat header)
+        header = tk.Frame(self, bg=self.colors['primary'], height=90)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         
         tk.Label(
             header,
-            text="🏪 PROMISE POS CLOSING SYSTEM",
+            text="🏪 PROMISE POS CLOSING",
             bg=self.colors['primary'],
             fg='white',
-            font=('Helvetica', 18, 'bold')
-        ).pack(expand=True)
+            font=(self.font_family, 22, 'bold')
+        ).pack(side=tk.LEFT, padx=30, pady=25)
         
         # Main content
-        main = tk.Frame(self, bg=self.colors['light'], padx=30, pady=30)
+        main = tk.Frame(self, bg=self.colors['light'], padx=40, pady=40)
         main.pack(fill=tk.BOTH, expand=True)
         
-        # Input section
-        input_frame = tk.LabelFrame(
+        # Style ttk for modern look
+        try:
+            style = ttk.Style()
+            style.theme_use('clam')
+        except:
+            pass
+        
+        # --- INPUT SECTION (Modern Card) ---
+        input_card = tk.Frame(
             main, 
-            text="Input Data", 
             bg=self.colors['white'], 
-            padx=25,
-            pady=25,
-            font=('Helvetica', 12, 'bold')
+            highlightbackground=self.border_color,
+            highlightcolor=self.border_color,
+            highlightthickness=1
         )
-        input_frame.pack(fill=tk.X, pady=(0, 20))
+        input_card.pack(fill=tk.X, pady=(0, 25))
+        
+        input_content = tk.Frame(input_card, bg=self.colors['white'], padx=30, pady=30)
+        input_content.pack(fill=tk.BOTH, expand=True)
+        
+        tk.Label(
+            input_content,
+            text="Data Information",
+            bg=self.colors['white'],
+            fg=self.colors['primary'],
+            font=(self.font_family, 14, 'bold')
+        ).grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 20))
         
         # Date
         tk.Label(
-            input_frame, 
+            input_content, 
             text="Tanggal:", 
             bg=self.colors['white'],
-            font=('Helvetica', 12)
-        ).grid(row=0, column=0, sticky='w', padx=5, pady=10)
+            fg=self.text_color,
+            font=(self.font_family, 12)
+        ).grid(row=1, column=0, sticky='w', padx=(0, 20), pady=10)
         
         self.date_picker = SimpleDatePicker(
-            input_frame,
+            input_content,
             textvariable=self.date_var
         )
-        self.date_picker.grid(row=0, column=1, padx=15, pady=10, sticky='w')
+        self.date_picker.grid(row=1, column=1, sticky='w', pady=10)
         
         # Outlet
         tk.Label(
-            input_frame, 
+            input_content, 
             text="Outlet:", 
             bg=self.colors['white'],
-            font=('Helvetica', 12)
-        ).grid(row=1, column=0, sticky='w', padx=5, pady=10)
+            fg=self.text_color,
+            font=(self.font_family, 12)
+        ).grid(row=2, column=0, sticky='w', padx=(0, 20), pady=10)
+        
+        outlet_frame = tk.Frame(
+            input_content, 
+            bg=self.colors['light'],
+            highlightbackground=self.border_color,
+            highlightthickness=1
+        )
+        outlet_frame.grid(row=2, column=1, sticky='w', pady=10)
         
         outlet_label = tk.Label(
-            input_frame, 
+            outlet_frame, 
             text=settings.get_outlet(), 
             bg=self.colors['light'], 
-            relief='sunken', 
+            fg=self.text_color,
             width=15,
-            font=('Helvetica', 12, 'bold'),
+            font=(self.font_family, 12, 'bold'),
             padx=10,
             pady=8
         )
-        outlet_label.grid(row=1, column=1, padx=15, pady=10, sticky='w')
+        outlet_label.pack()
         
-        # Buttons
-        btn_frame = tk.Frame(input_frame, bg=self.colors['white'])
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=20)
+        # --- BUTTONS SECTION ---
+        btn_frame = tk.Frame(input_content, bg=self.colors['white'])
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=(25, 0), sticky='w')
         
-        # Tombol Hari Ini
-        self.today_btn = tk.Button(
-            btn_frame, 
-            text="📅 Hari Ini",
-            command=self.set_today,
-            bg=self.colors['accent'], 
-            fg='white',
-            font=('Helvetica', 12, 'bold'),
-            width=8,  # Ditambah dari 6 ke 8
-            height=1,
-            padx=15,
-            pady=10,
-            cursor='hand2',
-            relief='raised',
-            borderwidth=3
-        )
-        self.today_btn.pack(side=tk.LEFT, padx=10)
+        # Function to create flat modern buttons
+        def create_button(parent, text, command, bg_color, is_large=False):
+            font_size = 13 if is_large else 11
+            pad_y = 12 if is_large else 10
+            pad_x = 25 if is_large else 20
+            
+            btn = tk.Button(
+                parent,
+                text=text,
+                command=command,
+                bg=bg_color,
+                fg='white',
+                font=(self.font_family, font_size, 'bold'),
+                cursor='hand2',
+                relief='flat',
+                borderwidth=0,
+                padx=pad_x,
+                pady=pad_y,
+                activebackground=self.darken_color(bg_color),
+                activeforeground='white'
+            )
+            return btn
         
-        # Tombol Kemarin
-        self.yesterday_btn = tk.Button(
-            btn_frame, 
-            text="📅 Kemarin",
-            command=self.set_yesterday,
-            bg=self.colors['accent'], 
-            fg='white',
-            font=('Helvetica', 12, 'bold'),
-            width=8,  # Ditambah dari 6 ke 8
-            height=1,
-            padx=15,
-            pady=10,
-            cursor='hand2',
-            relief='raised',
-            borderwidth=3
-        )
-        self.yesterday_btn.pack(side=tk.LEFT, padx=10)
+        self.today_btn = create_button(btn_frame, "📅 Hari Ini", self.set_today, self.colors['accent'])
+        self.today_btn.pack(side=tk.LEFT, padx=(0, 15))
         
-        # Tombol Generate
-        self.generate_btn = tk.Button(
-            btn_frame, 
-            text="🚀 GENERATE & KIRIM",
-            command=self.on_generate,
-            bg=self.colors['success'], 
-            fg='white',
-            font=('Helvetica', 14, 'bold'),  # Ditambah dari 13 ke 14
-            width=15,  # Ditambah dari 8 ke 15
-            height=1,
-            padx=20,  # Ditambah dari 15 ke 20
-            pady=12,  # Ditambah dari 10 ke 12
-            cursor='hand2',
-            relief='raised',
-            borderwidth=4
-        )
-        self.generate_btn.pack(side=tk.LEFT, padx=20)
+        self.yesterday_btn = create_button(btn_frame, "📅 Kemarin", self.set_yesterday, self.colors['accent'])
+        self.yesterday_btn.pack(side=tk.LEFT, padx=(0, 15))
+        
+        self.generate_btn = create_button(btn_frame, "🚀 GENERATE & KIRIM", self.on_generate, self.colors['success'], True)
+        self.generate_btn.pack(side=tk.LEFT, padx=(15, 15))
 
-        #Tombol Kirim ke API
-        self.api_btn = tk.Button(
-            btn_frame, 
-            text="🌐 KIRIM KE API",
-            command=self.on_send_api,
-            bg=self.colors['accent'], 
-            fg='white',
-            font=('Helvetica', 12, 'bold'),
-            width=10,
-            height=1,
-            padx=15,
-            pady=10,
-            cursor='hand2',
-            relief='raised',
-            borderwidth=3
-        )
-        self.api_btn.pack(side=tk.LEFT, padx=10)
+        self.api_btn = create_button(btn_frame, "🌐 KIRIM KE API", self.on_send_api, self.colors['accent'])
+        self.api_btn.pack(side=tk.LEFT, padx=(0, 0))
         
-        # Log area
-        log_frame = tk.LabelFrame(
+        # --- LOG SECTION (Modern Terminal Look) ---
+        log_card = tk.Frame(
             main, 
-            text="Activity Log", 
             bg=self.colors['white'],
-            font=('Helvetica', 12, 'bold'),
-            padx=10,
-            pady=10
+            highlightbackground=self.border_color,
+            highlightthickness=1
         )
-        log_frame.pack(fill=tk.BOTH, expand=True)
+        log_card.pack(fill=tk.BOTH, expand=True)
         
-        # Frame untuk log dan scrollbar
-        log_container = tk.Frame(log_frame, bg=self.colors['white'])
-        log_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        log_header = tk.Frame(log_card, bg=self.colors['white'], padx=20, pady=15)
+        log_header.pack(fill=tk.X)
         
-        # Text widget
+        tk.Label(
+            log_header,
+            text="Activity Log",
+            bg=self.colors['white'],
+            fg=self.text_color,
+            font=(self.font_family, 12, 'bold')
+        ).pack(side=tk.LEFT)
+        
+        log_container = tk.Frame(log_card, bg='#1e1e1e')  # Dark terminal bg
+        log_container.pack(fill=tk.BOTH, expand=True)
+        
         self.log_text = tk.Text(
             log_container, 
             height=12, 
-            width=80, 
-            bg='black', 
-            fg='lime', 
+            bg='#1e1e1e', 
+            fg='#4af626', # Hacker green
             font=('Consolas', 11),
-            padx=10,
-            pady=10
+            padx=15,
+            pady=15,
+            relief='flat',
+            borderwidth=0,
+            insertbackground='white'
         )
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Scrollbar
-        scrollbar = tk.Scrollbar(
+        # Modern Scrollbar
+        scrollbar = ttk.Scrollbar(
             log_container, 
-            width=20,
-            cursor='hand2'
+            orient='vertical',
+            command=self.log_text.yview
         )
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
-        scrollbar.config(command=self.log_text.yview)
         
         # Status bar di dalam dashboard
         self.create_status_bar()
     
+    def darken_color(self, hex_color, factor=0.85):
+        """Helper to darken a hex color for hover/active states"""
+        try:
+            hex_color = hex_color.lstrip('#')
+            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            r = max(0, int(r * factor))
+            g = max(0, int(g * factor))
+            b = max(0, int(b * factor))
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except:
+            return hex_color
+
     def create_status_bar(self):
         """Create status bar at bottom"""
-        status_bar = tk.Frame(self, bg=self.colors['secondary'], height=30)
+        status_bar = tk.Frame(self, bg=self.colors['secondary'], height=40)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
         status_bar.pack_propagate(False)
         
@@ -217,19 +238,19 @@ class DashboardView(tk.Frame):
             text="✓ Siap",
             bg=self.colors['secondary'],
             fg='white',
-            font=('Helvetica', 10)
+            font=(self.font_family, 10, 'bold')
         )
-        self.status_label.pack(side=tk.LEFT, padx=10)
+        self.status_label.pack(side=tk.LEFT, padx=20)
         
         # Date info
         self.date_info_label = tk.Label(
             status_bar,
             text=f"Tanggal: {self.date_var.get()}",
             bg=self.colors['secondary'],
-            fg='white',
-            font=('Helvetica', 10)
+            fg='#94a3b8', # Slate 400
+            font=(self.font_family, 10)
         )
-        self.date_info_label.pack(side=tk.RIGHT, padx=10)
+        self.date_info_label.pack(side=tk.RIGHT, padx=20)
         
         # Update date info when date changes
         self.date_var.trace('w', lambda *args: self.date_info_label.config(
@@ -264,9 +285,9 @@ class DashboardView(tk.Frame):
         
         # Disable buttons
         self.is_processing = True
-        self.generate_btn.config(state='disabled', bg=self.colors['secondary'])
-        self.today_btn.config(state='disabled', bg=self.colors['secondary'])
-        self.yesterday_btn.config(state='disabled', bg=self.colors['secondary'])
+        self.generate_btn.config(state='disabled', bg=self.colors['border'])
+        self.today_btn.config(state='disabled', bg=self.colors['border'])
+        self.yesterday_btn.config(state='disabled', bg=self.colors['border'])
         
         self.log("🚀 Memulai proses...")
         self.set_status("Memproses...")
@@ -309,7 +330,7 @@ class DashboardView(tk.Frame):
         
         # Disable buttons
         self.is_processing = True
-        self.api_btn.config(state='disabled', bg=self.colors['secondary'])
+        self.api_btn.config(state='disabled', bg=self.colors['border'])
         
         self.log("🌐 Mengirim data ke API...")
         self.set_status("Mengirim ke API...")

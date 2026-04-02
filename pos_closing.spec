@@ -5,13 +5,13 @@ from PyInstaller.utils.hooks import collect_data_files
 block_cipher = None
 
 mysql_datas = collect_data_files('mysql.connector')
-
+ 
 datas = [
     ('config.ini.example', '.'),
     ('README.md', '.'),
 ] + mysql_datas
 
-hiddenimports = [
+hiddenimports = [ 
     'mysql.connector',
     'mysql.connector.plugins',
     'mysql.connector.locales.eng',

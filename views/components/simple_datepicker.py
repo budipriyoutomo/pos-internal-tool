@@ -2,44 +2,66 @@
 import tkinter as tk
 from tkinter import ttk
 import datetime
+from config.settings import settings
 
 class SimpleDatePicker(tk.Frame):
-    """Date picker tanpa dependensi babel"""
+    """Date picker modern tanpa dependensi babel"""
     
     def __init__(self, master, textvariable=None, **kwargs):
         super().__init__(master, bg='white')
         
         self.variable = textvariable or tk.StringVar()
         self.current_date = datetime.datetime.now()
+        self.colors = settings.THEME_COLORS
+        self.border_color = self.colors.get('border', '#e5e7eb')
+        self.font_family = 'Segoe UI' if self._is_windows() else 'Helvetica'
         
-        # Frame untuk entry dan button
-        entry_frame = tk.Frame(self, bg='white')
-        entry_frame.pack()
+        # Frame untuk entry dan button dengan border
+        border_frame = tk.Frame(
+            self, 
+            bg=self.colors.get('white', 'white'),
+            highlightbackground=self.border_color,
+            highlightcolor=self.colors.get('primary', '#4338ca'),
+            highlightthickness=1
+        )
+        border_frame.pack(fill=tk.BOTH, expand=True)
         
         # Entry untuk menampilkan tanggal
         self.entry = tk.Entry(
-            entry_frame,
+            border_frame,
             textvariable=self.variable,
-            font=('Helvetica', 12),
-            width=15,
+            font=(self.font_family, 12),
+            width=14,
             justify='center',
-            state='readonly'
+            state='readonly',
+            readonlybackground='white',
+            fg=self.colors.get('text', '#1f2937'),
+            relief='flat',
+            borderwidth=5 # Internal padding
         )
-        self.entry.pack(side=tk.LEFT, padx=5)
+        self.entry.pack(side=tk.LEFT, padx=5, pady=2)
         
         # Tombol untuk memilih tanggal
         self.btn = tk.Button(
-            entry_frame,
+            border_frame,
             text="📅",
-            font=('Helvetica', 12),
+            font=(self.font_family, 12),
             command=self.show_calendar,
-            width=3,
-            cursor='hand2'
+            bg='white',
+            fg=self.colors.get('text', '#1f2937'),
+            relief='flat',
+            borderwidth=0,
+            cursor='hand2',
+            activebackground=self.colors.get('light', '#f3f4f6')
         )
-        self.btn.pack(side=tk.LEFT)
+        self.btn.pack(side=tk.RIGHT, fill=tk.Y, padx=5)
         
         # Set default ke hari ini
         self.set_date(self.current_date)
+        
+    def _is_windows(self):
+        import platform
+        return platform.system() == 'Windows'
     
     def set_date(self, date):
         """Set tanggal"""
@@ -55,74 +77,77 @@ class SimpleDatePicker(tk.Frame):
             return self.current_date
     
     def show_calendar(self):
-        """Tampilkan popup calendar sederhana"""
+        """Tampilkan popup calendar modern"""
         top = tk.Toplevel(self)
         top.title("Pilih Tanggal")
-        top.geometry("300x250")
+        top.geometry("340x300") # A bit wider for modern look
         top.transient(self.master)
         top.grab_set()
-        top.configure(bg='white')
+        top.configure(bg=self.colors.get('light', '#f3f4f6'))
         
         # Center popup
         top.update_idletasks()
-        x = (top.winfo_screenwidth() // 2) - (300 // 2)
-        y = (top.winfo_screenheight() // 2) - (250 // 2)
+        x = (top.winfo_screenwidth() // 2) - (340 // 2)
+        y = (top.winfo_screenheight() // 2) - (300 // 2)
         top.geometry(f"+{x}+{y}")
+        
+        # Main Card
+        card = tk.Frame(
+            top, 
+            bg='white',
+            highlightbackground=self.border_color,
+            highlightthickness=1
+        )
+        card.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Title
         tk.Label(
-            top,
+            card,
             text="Pilih Tanggal",
-            font=('Helvetica', 14, 'bold'),
-            bg='white'
-        ).pack(pady=10)
+            font=(self.font_family, 14, 'bold'),
+            bg='white',
+            fg=self.colors.get('primary', '#4338ca')
+        ).pack(pady=(15, 10))
         
         # Frame input
-        input_frame = tk.Frame(top, bg='white')
+        input_frame = tk.Frame(card, bg='white')
         input_frame.pack(pady=10)
         
-        # Year
-        tk.Label(input_frame, text="Tahun:", bg='white').grid(row=0, column=0, padx=5)
-        year_spin = tk.Spinbox(
-            input_frame, 
-            from_=2020, 
-            to=2030, 
-            width=8,
-            font=('Helvetica', 11)
-        )
-        year_spin.grid(row=0, column=1, padx=5)
-        year_spin.delete(0, tk.END)
-        year_spin.insert(0, self.current_date.year)
-        
-        # Month
-        tk.Label(input_frame, text="Bulan:", bg='white').grid(row=1, column=0, padx=5)
-        month_spin = tk.Spinbox(
-            input_frame, 
-            from_=1, 
-            to=12, 
-            width=8,
-            font=('Helvetica', 11)
-        )
-        month_spin.grid(row=1, column=1, padx=5)
-        month_spin.delete(0, tk.END)
-        month_spin.insert(0, self.current_date.month)
-        
-        # Day
-        tk.Label(input_frame, text="Hari:", bg='white').grid(row=2, column=0, padx=5)
-        day_spin = tk.Spinbox(
-            input_frame, 
-            from_=1, 
-            to=31, 
-            width=8,
-            font=('Helvetica', 11)
-        )
-        day_spin.grid(row=2, column=1, padx=5)
-        day_spin.delete(0, tk.END)
-        day_spin.insert(0, self.current_date.day)
+        def create_spinbox(parent, label_text, row, from_val, to_val, current_val):
+            tk.Label(
+                parent, 
+                text=label_text, 
+                bg='white',
+                fg=self.colors.get('text', '#1f2937'),
+                font=(self.font_family, 11)
+            ).grid(row=row, column=0, padx=10, pady=8, sticky='e')
+            
+            spin_frame = tk.Frame(
+                parent,
+                highlightbackground=self.border_color,
+                highlightthickness=1
+            )
+            spin_frame.grid(row=row, column=1, padx=10, pady=8)
+            
+            spin = ttk.Spinbox(
+                spin_frame, 
+                from_=from_val, 
+                to=to_val, 
+                width=8,
+                font=(self.font_family, 11)
+            )
+            spin.pack(padx=2, pady=2)
+            spin.delete(0, tk.END)
+            spin.insert(0, current_val)
+            return spin
+            
+        year_spin = create_spinbox(input_frame, "Tahun:", 0, 2020, 2030, self.current_date.year)
+        month_spin = create_spinbox(input_frame, "Bulan:", 1, 1, 12, self.current_date.month)
+        day_spin = create_spinbox(input_frame, "Hari:", 2, 1, 31, self.current_date.day)
         
         # Button frame
-        btn_frame = tk.Frame(top, bg='white')
-        btn_frame.pack(pady=15)
+        btn_frame = tk.Frame(card, bg='white')
+        btn_frame.pack(pady=(15, 15))
         
         def select():
             try:
@@ -138,36 +163,47 @@ class SimpleDatePicker(tk.Frame):
         def select_today():
             self.set_date(datetime.datetime.now())
             top.destroy()
+            
+        def create_btn(parent, text, cmd, bg_col, is_outline=False):
+            if is_outline:
+                btn_bg = 'white'
+                btn_fg = self.colors.get('text', '#1f2937')
+            else:
+                btn_bg = bg_col
+                btn_fg = 'white'
+                
+            return tk.Button(
+                parent,
+                text=text,
+                command=cmd,
+                bg=btn_bg,
+                fg=btn_fg,
+                font=(self.font_family, 10, 'bold'),
+                width=8,
+                cursor='hand2',
+                relief='flat' if not is_outline else 'solid',
+                borderwidth=0 if not is_outline else 1,
+                padx=5,
+                pady=6
+            )
         
-        tk.Button(
+        btn_today = create_btn(btn_frame, "Hari Ini", select_today, self.colors.get('accent', '#4f46e5'))
+        btn_today.pack(side=tk.LEFT, padx=5)
+        
+        btn_select = tk.Button(
             btn_frame,
             text="Pilih",
             command=select,
-            bg='#27ae60',
+            bg=self.colors.get('success', '#059669'),
             fg='white',
-            font=('Helvetica', 11, 'bold'),
+            font=(self.font_family, 10, 'bold'),
             width=8,
-            cursor='hand2'
-        ).pack(side=tk.LEFT, padx=5)
+            cursor='hand2',
+            relief='flat',
+            padx=5,
+            pady=6
+        )
+        btn_select.pack(side=tk.LEFT, padx=5)
         
-        tk.Button(
-            btn_frame,
-            text="Hari Ini",
-            command=select_today,
-            bg='#3498db',
-            fg='white',
-            font=('Helvetica', 11),
-            width=8,
-            cursor='hand2'
-        ).pack(side=tk.LEFT, padx=5)
-        
-        tk.Button(
-            btn_frame,
-            text="Batal",
-            command=top.destroy,
-            bg='#e74c3c',
-            fg='white',
-            font=('Helvetica', 11),
-            width=8,
-            cursor='hand2'
-        ).pack(side=tk.LEFT, padx=5)
+        btn_cancel = create_btn(btn_frame, "Batal", top.destroy, self.colors.get('danger', '#dc2626'), is_outline=True)
+        btn_cancel.pack(side=tk.LEFT, padx=5)

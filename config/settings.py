@@ -36,16 +36,18 @@ class Settings:
         self.LOGS_DIR.mkdir(exist_ok=True)
         
         
-        # Colors
+        # Colors - Modern Premium Palette
         self.THEME_COLORS = {
-            'primary': '#2c3e50',
-            'secondary': '#34495e',
-            'accent': '#3498db',
-            'success': '#27ae60',
-            'warning': '#f39c12',
-            'danger': '#e74c3c',
-            'light': '#ecf0f1',
-            'white': '#ffffff',
+            'primary': '#4338ca',     # Indigo 700 - Headers
+            'secondary': '#1e1b4b',   # Indigo 950 - Status bar
+            'accent': '#4f46e5',      # Indigo 600 - Buttons
+            'success': '#059669',     # Emerald 600 - Main action
+            'warning': '#d97706',     # Amber 600
+            'danger': '#dc2626',      # Red 600
+            'light': '#f3f4f6',       # Gray 100 - Background
+            'white': '#ffffff',       # White - Cards
+            'text': '#1f2937',        # Gray 800
+            'border': '#e5e7eb',      # Gray 200
         }
     
     def load_config(self):
@@ -75,6 +77,13 @@ class Settings:
             'REPORT_FORMAT': 'txt'
         }
         
+        self.config['API'] = {
+            'BASE_URL': 'http://localhost:8080/api',
+            'TIMEOUT': '30',
+            'API_KEY': ''
+        }
+        
+
         # Try to load existing config file
         if self.config_path.exists():
             try:
@@ -121,5 +130,13 @@ class Settings:
     def get_outlet(self):
         """Get outlet code"""
         return self.config['DEFAULT']['OUTLET']
+    
+    def get_api_config(self):
+        """Get API configuration"""
+        return {
+            'base_url': self.config['API']['BASE_URL'],
+            'timeout': int(self.config['API']['TIMEOUT']),
+            'api_key': self.config['API']['API_KEY']
+        }
 
 settings = Settings()
