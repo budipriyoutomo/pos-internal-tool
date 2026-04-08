@@ -289,8 +289,6 @@ Shortcut:
         except Exception as e:
             print(f"Error during shutdown: {e}")
             self.destroy()
-    
- 
 
 # ==================== ENTRY POINT ====================
 if __name__ == "__main__":

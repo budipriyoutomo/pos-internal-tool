@@ -2,7 +2,7 @@ import requests
 import json
 import time
 from config.settings import settings
-from queue_db import insert_queue, get_pending, mark_sent, increase_retry
+from queue_db import insert_queue, get_pending, mark_sent, increase_retry, update_last_sync
 
 
 class APIClient:
@@ -17,14 +17,24 @@ class APIClient:
 
     def enqueue_sales(self, date_str, payload):
         try:
+            #
+            #data = {
+            #    "date": date_str,
+            #    "batch_id": f"BATCH-{int(time.time())}",
+            #    "source": "pos_closing_system",
+# 
+#                "outlet": getattr(self, "outlet_code", None),
+#                "sales": payload
+#           }
+
             data = {
-                "date": date_str,
-                "batch_id": f"BATCH-{int(time.time())}",
-                "source": "pos_closing_system",
- 
-                "outlet": getattr(self, "outlet_code", None),
-                "sales": payload
-            }
+                    "meta": {
+                        "date": date_str,
+                        "batch_id": f"BATCH-{int(time.time())}",
+                        "source": "pos_closing_system"
+                    },
+                    "payload": payload   # simpan di wrapper
+                }
 
             insert_queue(json.dumps(data))
 
@@ -74,20 +84,43 @@ class APIClient:
 
         for id, payload_str, retry_count in items:
             try:
-                payload = json.loads(payload_str)
+                payload_wrapper = json.loads(payload_str)
 
-                print(f"📤 Kirim ID {id} (retry: {retry_count})")
+                # ✅ FIX DISINI
+                real_payload = payload_wrapper.get("payload", payload_wrapper)
 
-                response = self._send(payload)
-                #print("PAYLOAD:", json.dumps(payload, indent=2))
-                print("STATUS:", response.status_code)
+                #print("FINAL PAYLOAD:")
+                #print(json.dumps(real_payload, indent=2))
+
+                response = self._send(real_payload)
+
+                print(json.dumps(real_payload, indent=2))
 
                 if response.status_code == 200:
                     mark_sent(id)
+
+                    sales = real_payload.get("sales", [])
+
+                    if sales:
+                        try:
+                            last_transaction_id = max(
+                                int(s.get("transaction_id", 0)) for s in sales
+                            )
+
+                            if last_transaction_id > 0:
+                                update_last_sync(str(last_transaction_id))
+                                print(f"🧠 last_sync updated → {last_transaction_id}")
+                            else:
+                                print("⚠️ last_transaction_id invalid")
+
+                        except Exception as e:
+                            print(f"❌ gagal hitung last_transaction_id: {e}")
+
                     print(f"✅ ID {id} sukses dikirim & dihapus")
                 else:
                     increase_retry(id)
                     print(f"⚠️ ID {id} gagal (status {response.status_code})")
+                    print(f"Response: {response.text}")
 
             except requests.exceptions.RequestException:
                 print(f"❌ ID {id} gagal koneksi")

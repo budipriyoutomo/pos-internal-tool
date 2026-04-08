@@ -83,13 +83,16 @@ class DashboardController:
             self.view.log(f"❌ Error: {str(e)}")
             self.view.show_error("Error", str(e))
             return False
+        
     def send_to_api(self, date_str):
         try:
             self.log_info("📤 Menyiapkan data untuk dikirim...")
 
             last_id = int(get_last_sync() or 0)
+            print(f"🧠 last_sync: {last_id}")
  
             headers = TransactionData.get_sales_header(last_id, date_str)
+            print(f"📊 Ditemukan {len(headers)} transaksi baru sejak ID {last_id}")
 
             if not headers:
                 self.log_warning("Tidak ada header untuk dikirim")
@@ -108,23 +111,25 @@ class DashboardController:
             payload = self.build_payload(headers, details)
             print(payload)
               
-            if not payload:
+            if not payload.get("sales"):
                 self.log_warning("Payload kosong setelah build")
                 return False
 
-            self.log_info(f"📦 Total transaksi: {len(payload)}")
+            self.log_info(f"📦 Total transaksi: {len(payload['sales'])}")
 
             # 🔥 DEBUG (optional)
-            print(json.dumps(payload[:1], indent=2))
-
+            print("PAYLOAD PREVIEW:")
+            print(json.dumps(payload["sales"][:1], indent=2))
+ 
+            
             # ✅ masuk queue
             self.api_client.enqueue_sales(date_str, payload)
  
-            new_last_id = max(h["TransactionID"] for h in headers)
-
-            update_last_sync(str(new_last_id))
+            new_last_id = max(h["TransactionID"] for h in headers) 
 
             self.log_success(f"Sync berhasil sampai ID {new_last_id}")
+
+            #update_last_sync(str(new_last_id))
 
             return True
 
@@ -164,35 +169,107 @@ class DashboardController:
         
         for s in suggestions:
             self.log_warning(s)
-             
+
     def build_payload(self, headers, details):
+
+        def to_iso(dt):
+            if not dt:
+                return None
+            return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+
         detail_map = {}
- 
+        self.log_error("🔹 Membangun payload untuk API...")
+        # 🔹 mapping detail ke item (SUDAH SESUAI FORMAT BARU)
         for d in details:
-            trx_id = d["TransactionID"]
+            trx_id = int(d["TransactionID"])
 
             if trx_id not in detail_map:
                 detail_map[trx_id] = []
 
             detail_map[trx_id].append({
-                "order_detail_id": d["OrderDetailID"],
-                "product_id": d["ProductID"],
-                "product_name": d.get("Name"),
+                "order_detail_id": int(d["OrderDetailID"]),  # ✅ rename
+                "transaction_id": trx_id,
+                "sale_date": str(d.get("SaleDate")),
+
+                "product_id": int(d["ProductID"]),
+                "product_name": str(d.get("ProductName")),
+                "product_group": str(d.get("ProductGroupName")),
+                "product_dept": str(d.get("ProductDeptName")),
+
+                "product_set_type": int(d.get("ProductSetType", 0)),
+                "order_status_id": int(d.get("OrderStatusID", 2)),
+                "sale_mode": int(d.get("SaleMode", 1)),
+
                 "qty": float(d["Amount"]),
-                "price": float(d["Price"]), 
+                "price": float(d["Price"]),
+                "retail_price": float(d.get("RetailPrice", d.get("Price", 0))),
+                "minimum_price": float(d.get("MinimumPrice", 0)),
+
+                "comment": d.get("Comment") or "",
+                "order_staff_id": int(d.get("OrderStaffID", 0)),
+                "order_table_id": int(d.get("OrderTableID", 0)),
+                "void_staff_id": int(d.get("VoidStaffID", 0)),
             })
- 
+
         result = []
 
+        # 🔹 mapping header ke sales (SUDAH FULL SESUAI SPEC)
         for h in headers:
-            trx_id = h["TransactionID"]
+            trx_id = int(h["TransactionID"]) 
+
+            paid_time = to_iso(h.get("PaidTime"))
 
             result.append({
-                "transaction_id": trx_id,
-                "outlet_code": h.get("outlet_code"),
+                "transaction_id": trx_id,  # ✅ rename 
+                "invoice_number": h.get("ReferenceNo"),  # ✅ rename
+
                 "sale_date": str(h.get("SaleDate")),
-                "total_amount": float(h.get("ReceiptTotalAmount", 0)),
+                "paid_time": paid_time,
+                "close_time": to_iso(h.get("CloseTime")),
+                "trx_date": paid_time,  # ✅ tambahan WAJIB
+
+                "shop_id": int(h.get("ShopID", 0)),
+                "transaction_status_id": int(h.get("TransactionStatusID", 1)),
+                "sale_mode": int(h.get("SaleMode", 1)),
+                "no_customer": int(h.get("NoCustomer", 1)),
+                "deleted": int(h.get("Deleted", 0)),
+
+                "receipt_product_retail_price": float(h.get("ReceiptProductRetailPrice", 0)),
+                "receipt_sale_price": float(h.get("ReceiptSalePrice", 0)),
+                "receipt_pay_price": float(h.get("ReceiptPayPrice", 0)),
+                "receipt_discount": float(h.get("ReceiptDiscount", 0)),
+                "receipt_total_amount": float(h.get("ReceiptTotalAmount", 0)),
+
+                "other_percent_discount": float(h.get("OtherPercentDiscount", 0)),
+                "other_amount_discount": float(h.get("OtherAmountDiscount", 0)),
+
+                "vat_percent": float(h.get("VATPercent", 0)),
+                "transaction_vat": float(h.get("TransactionVAT", 0)),
+                "transaction_exclude_vat": float(h.get("TransactionExcludeVAT", 0)),
+                "transaction_vatable": float(h.get("TransactionVATable", 0)),
+
+                "service_charge_percent": float(h.get("ServiceChargePercent", 0)),
+                "service_charge": float(h.get("ServiceCharge", 0)),
+                "service_charge_vat": float(h.get("ServiceChargeVAT", 0)),
+
+                "other_income": float(h.get("OtherIncome", 0)),
+                "other_income_vat": float(h.get("OtherIncomeVAT", 0)),
+
+                "void_staff_id": int(h.get("VoidStaffID", 0)),
+                "void_reason": h.get("VoidReason") or "",
+                "void_time": to_iso(h.get("VoidTime")),
+
+                "transaction_note": h.get("TransactionNote") or "",
+                "queue_name": h.get("QueueName") or "",
+                "reference_no": h.get("ReferenceNo"),
+
+                "is_split_transaction": int(h.get("IsSplitTransaction", 0)),
+                "is_from_other_transaction": int(h.get("IsFromOtherTransaction", 0)),
+
+                # 🔥 RELATION
                 "items": detail_map.get(trx_id, [])
             })
 
-        return result
+        return { 
+            "sales": result
+        }
