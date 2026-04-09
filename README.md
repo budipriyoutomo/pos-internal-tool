@@ -11,3 +11,6 @@
 - views/ - UI components
 - controllers/ - Business logic
 - utils/ - Helper functions
+
+## Deploy tanpa spec dulu 
+pyinstaller --clean main.py
