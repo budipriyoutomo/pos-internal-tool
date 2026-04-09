@@ -28,14 +28,15 @@ class ReportGenerator:
         outletname = outlet
         
         if transactions and len(transactions) > 0:
-            x = transactions[-1]  # ambil data terakhir
-            summary = str(x[0]) if len(x) > 0 else ""
-            disc = int(x[1]) if len(x) > 1 else 0
-            trans = x[2] if len(x) > 2 else 0
-            service = int(x[3]) if len(x) > 3 else 0
-            tax = int(x[4]) if len(x) > 4 else 0
-            outletcode = str(x[6]) if len(x) > 6 else outlet
-            outletname = str(x[7]) if len(x) > 7 else outlet
+            x = transactions[-1]  # ambil data terakhir 
+
+            summary = str(x.get("AmountSummary", ""))
+            disc = int(x.get("Disc", 0))
+            trans = float(x.get("AmountTransaksi", 0))
+            service = int(x.get("AmountService", 0))
+            tax = int(x.get("Tax", 0))
+            outletcode = str(x.get("OutletCode", outlet))
+            outletname = str(x.get("OutletName", outlet))
         
         # Create filename
         filename = self.reports_dir / f"{outlet}_{currentdate}.txt"
@@ -65,13 +66,14 @@ class ReportGenerator:
             totaldine = 0
             countdine = 0
             
-            for y in dine_in:
-                a = str(y[0])[0:14] if y and len(y) > 0 else ""
-                b = str(int(y[1])) if len(y) > 1 else "0"
-                c = str(int(y[2])) if len(y) > 2 else "0"
-                
-                totaldine += int(c)
-                countdine += int(b)
+            for y in dine_in: 
+
+                a = str(y.get("Group", ""))[0:14]
+                b = str(int(y.get("TotalQty", 0)))
+                c = str(int(y.get("AmountMenu", 0)))
+
+                totaldine += int(y.get("AmountMenu", 0))
+                countdine += int(y.get("TotalQty", 0))
                 
                 d = a.ljust(15) + b.center(10) + c.rjust(10) + " \n"
                 f.write(d)
@@ -86,13 +88,13 @@ class ReportGenerator:
             counttake = 0
             
             for z in takeaway:
-                a = str(z[0]) if z and len(z) > 0 else ""
-                b = str(int(z[1])) if len(z) > 1 else "0"
-                c = str(int(z[2])) if len(z) > 2 else "0"
-                
-                totaltake += int(c)
-                counttake += int(b)
-                
+                a = str(z.get("Group", ""))[0:14]
+                b = str(int(z.get("TotalQty", 0)))
+                c = str(int(z.get("AmountMenu", 0)))
+
+                totaltake += int(z.get("AmountMenu", 0))
+                counttake += int(z.get("TotalQty", 0))
+
                 d = a.ljust(15) + b.center(10) + c.rjust(10) + " \n"
                 f.write(d)
             

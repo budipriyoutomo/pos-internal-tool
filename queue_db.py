@@ -3,9 +3,17 @@ from datetime import datetime
 
 import os
  
+import sys
 
+def get_base_path():
+    # 🔥 kalau jalan dari EXE
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # 🔧 kalau jalan dari source
+    return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = get_base_path()
 DB_NAME = os.path.join(BASE_DIR, "queue.db")
 
 # ==============================
