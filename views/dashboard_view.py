@@ -28,6 +28,7 @@ class DashboardView(tk.Frame):
         
         # Setup UI
         self.setup_ui()
+        self.start_auto_send()  # Mulai auto send saat view diinisialisasi
         
     def _is_windows(self):
         import platform
@@ -153,17 +154,28 @@ class DashboardView(tk.Frame):
             )
             return btn
         
-        self.today_btn = create_button(btn_frame, "📅 Hari Ini", self.set_today, self.colors['accent'])
-        self.today_btn.pack(side=tk.LEFT, padx=(0, 15))
-        
-        self.yesterday_btn = create_button(btn_frame, "📅 Kemarin", self.set_yesterday, self.colors['accent'])
-        self.yesterday_btn.pack(side=tk.LEFT, padx=(0, 15))
-        
-        self.generate_btn = create_button(btn_frame, "🚀 GENERATE & KIRIM", self.on_generate, self.colors['success'], True)
-        self.generate_btn.pack(side=tk.LEFT, padx=(15, 15))
+                # --- BUTTON SECTION (IMPROVED LAYOUT) ---
+        btn_wrapper = tk.Frame(main, bg=self.colors['white'])
+        btn_wrapper.pack(fill=tk.X, padx=20, pady=(10, 15))
 
-        self.api_btn = create_button(btn_frame, "🌐 KIRIM KE API", self.on_send_api, self.colors['accent'])
-        self.api_btn.pack(side=tk.LEFT, padx=(0, 0))
+        # LEFT GROUP (tanggal)
+        left_group = tk.Frame(btn_wrapper, bg=self.colors['white'])
+        left_group.pack(side=tk.LEFT)
+ 
+        # RIGHT GROUP (actions)
+        right_group = tk.Frame(btn_wrapper, bg=self.colors['white'])
+        right_group.pack(side=tk.RIGHT)
+
+        self.generate_btn = create_button(
+            right_group, "🚀 GENERATE & KIRIM", self.on_generate, self.colors['success'], True
+        )
+        self.generate_btn.pack(side=tk.LEFT, padx=5)
+ 
+
+        self.colorplate_btn = create_button(
+            right_group, "🌐 CLOSING COLORPLATE", self.on_close_colorplate, self.colors['accent']
+        )
+        self.colorplate_btn.pack(side=tk.LEFT, padx=5)
         
         # --- LOG SECTION (Modern Terminal Look) ---
         log_card = tk.Frame(
@@ -214,6 +226,26 @@ class DashboardView(tk.Frame):
         # Status bar di dalam dashboard
         self.create_status_bar()
     
+    def start_auto_send(self):
+        """Mulai auto send tiap 5 menit"""
+        self.master.after(300000, self.auto_send_api)
+
+    def auto_send_api(self):
+        """Auto kirim API tiap 5 menit"""
+        if not self.is_processing:
+            self.log("⏰ Auto trigger: Kirim data ke API")
+            self.send_api_silent()
+
+        self.start_auto_send()
+
+    def send_api_silent(self):
+        """Kirim API otomatis tanpa konfirmasi"""
+        self.is_processing = True 
+        self.set_status("Auto mengirim ke API...")
+
+        thread = threading.Thread(target=self.run_send_api, daemon=True)
+        thread.start()
+        
     def darken_color(self, hex_color, factor=0.85):
         """Helper to darken a hex color for hover/active states"""
         try:
@@ -329,14 +361,29 @@ class DashboardView(tk.Frame):
             return
         
         # Disable buttons
-        self.is_processing = True
-        self.api_btn.config(state='disabled', bg=self.colors['border'])
+        self.is_processing = True 
         
         self.log("🌐 Mengirim data ke API...")
         self.set_status("Mengirim ke API...")
         
         # Run in thread
         thread = threading.Thread(target=self.run_send_api, daemon=True)
+        thread.start()
+
+    def on_close_colorplate(self):
+        """Handle close colorplate button click"""
+        if self.is_processing:
+            self.log("⚠️ Proses sedang berjalan, harap tunggu...")
+            return
+        
+        # Konfirmasi dulu
+        if not self.ask_yes_no("Konfirmasi", "Apakah Anda yakin ingin menutup colorplate?"):
+            return
+        
+        self.log("🔒 Menutup colorplate...")
+
+        # Run in thread
+        thread = threading.Thread(target=self.run_send_colorplate, daemon=True)
         thread.start()
 
     def run_send_api(self):
@@ -357,10 +404,33 @@ class DashboardView(tk.Frame):
         finally:
             self.master.after(0, self.reset_api_button)
 
+    def run_send_colorplate(self):
+        """Run close colorplate in thread"""
+        date_str = self.date_var.get()
+        
+        try:
+            success = self.controller.close_colorplate(date_str)
+            
+            if success:
+                self.log("✅ Colorplate berhasil ditutup!")
+            else:
+                self.log("❌ Gagal menutup colorplate")
+                
+        except Exception as e:
+            self.log(f"❌ Error: {str(e)}")
+            
+        finally:
+            self.master.after(0, self.reset_colorplate_button)
+
     def reset_api_button(self):
         """Reset API button state"""
+        self.is_processing = False 
+        self.set_status("Siap")
+
+    def reset_colorplate_button(self):
+        """Reset Colorplate button state"""
         self.is_processing = False
-        self.api_btn.config(
+        self.colorplate_btn.config(
             state='normal', 
             bg=self.colors['accent']
         )
@@ -380,8 +450,7 @@ class DashboardView(tk.Frame):
         self.yesterday_btn.config(
             state='normal', 
             bg=self.colors['accent']
-        )
-        self.api_btn.config(state='normal', bg=self.colors['accent'])
+        ) 
         self.set_status("Siap")
     
     def set_status(self, status):

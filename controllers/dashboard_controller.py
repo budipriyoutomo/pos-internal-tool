@@ -84,6 +84,20 @@ class DashboardController:
             self.view.show_error("Error", str(e))
             return False
         
+    def close_colorplate(self, date_str):
+        try:
+            self.view.log("🔒 Menutup Colorplate...")
+            self.send_to_api(date_str)
+            self.api_client.close_colorplate(date_str)
+            self.view.log("✅ Colorplate ditutup!")
+            return True
+        except Exception as e:
+            import traceback
+            traceback.print_exc()   # tampilkan error asli di console
+            self.view.log(f"❌ Error: {str(e)}")
+            self.view.show_error("Error", str(e))
+            return False
+        
     def send_to_api(self, date_str):
         try:
             self.log_info("📤 Menyiapkan data untuk dikirim...")
@@ -96,7 +110,7 @@ class DashboardController:
 
             if not headers:
                 self.log_warning("Tidak ada header untuk dikirim")
-                return False
+                return True
  
             if isinstance(headers[0], tuple):
                 raise Exception("Database return tuple, harus dict (fix execute_query)")
@@ -125,11 +139,11 @@ class DashboardController:
             # ✅ masuk queue
             self.api_client.enqueue_sales(date_str, payload)
  
-            new_last_id = max(h["TransactionID"] for h in headers) 
+            new_last_id = max(h["ReceiptID"] for h in headers) 
 
             self.log_success(f"Sync berhasil sampai ID {new_last_id}")
 
-            #update_last_sync(str(new_last_id))
+            update_last_sync(str(new_last_id))
 
             return True
 
@@ -234,6 +248,10 @@ class DashboardController:
                 "no_customer": int(h.get("NoCustomer", 1)),
                 "deleted": int(h.get("Deleted", 0)),
 
+                "receipt_id": int(h.get("ReceiptID", 0)),
+                "receipt_month": int(h.get("ReceiptMonth", 0)),
+                "receipt_year": int(h.get("ReceiptYear", 0)),
+                
                 "receipt_product_retail_price": float(h.get("ReceiptProductRetailPrice", 0)),
                 "receipt_sale_price": float(h.get("ReceiptSalePrice", 0)),
                 "receipt_pay_price": float(h.get("ReceiptPayPrice", 0)),

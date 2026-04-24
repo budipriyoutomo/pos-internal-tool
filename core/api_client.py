@@ -1,9 +1,10 @@
 import requests
 import json
-import time
+import time 
 from config.settings import settings
 from queue_db import insert_queue, get_pending, mark_sent, increase_retry, update_last_sync
-
+from datetime import date
+import requests
 
 class APIClient:
     def __init__(self):
@@ -69,7 +70,34 @@ class APIClient:
         )
 
         return response
+    
+    def close_colorplate(self, payload=None):
+        endpoint = f"{self.base_url}/sales/publish"
 
+        headers = {
+            "Authorization": f"Bearer {settings.get_api_config()['api_key']}",
+            "User-Agent": "PromisePOS-Internal/1.0",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+        # ✅ Default payload kalau tidak dikirim dari luar
+        if payload is None:
+            payload = {
+                "exchange": "posdata_exchange",
+                "routing_key": "posdata.created",
+                "date": date.today().isoformat(),  # otomatis hari ini
+            }
+
+        response = requests.post(
+            endpoint,
+            json=payload,
+            headers=headers,
+            timeout=self.timeout,
+        )
+
+        return response
+    
     # ==============================
     # 🔁 PROCESS QUEUE (worker)
     # ==============================
@@ -103,18 +131,18 @@ class APIClient:
 
                     if sales:
                         try:
-                            last_transaction_id = max(
-                                int(s.get("transaction_id", 0)) for s in sales
+                            last_receipt_id = max(
+                                int(s.get("receipt_id", 0)) for s in sales
                             )
 
-                            if last_transaction_id > 0:
-                                update_last_sync(str(last_transaction_id))
-                                print(f"🧠 last_sync updated → {last_transaction_id}")
+                            if last_receipt_id > 0:
+                                #update_last_sync(str(last_receipt_id))
+                                print(f"🧠 last_sync updated → {last_receipt_id}")
                             else:
-                                print("⚠️ last_transaction_id invalid")
+                                print("⚠️ last_receipt_id invalid")
 
                         except Exception as e:
-                            print(f"❌ gagal hitung last_transaction_id: {e}")
+                            print(f"❌ gagal hitung last_receipt_id: {e}")
 
                     print(f"✅ ID {id} sukses dikirim & dihapus")
                 else:

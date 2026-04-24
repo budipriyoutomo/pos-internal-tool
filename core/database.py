@@ -94,7 +94,7 @@ class TransactionData:
         query = """
             SELECT *
             FROM vw_ordertransaction
-            WHERE TransactionID > %s AND saledate = %s
+            WHERE ReceiptID > %s AND saledate = %s
         """
         with DatabaseConnection() as db:
             return db.execute_query(query, (last_id, saledate))
