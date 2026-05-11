@@ -88,7 +88,17 @@ class DashboardController:
         try:
             self.view.log(f"🔒 Menutup Colorplate tanggal {date_str}...")
             self.send_to_api(date_str)
-            self.api_client.close_colorplate(date_str)
+
+            response = self.api_client.close_colorplate(date_str)
+            
+            self.view.log(f"📡 Status API: {response.status_code}")
+            self.view.log(f"📦 Response: {response.text}")
+
+            if response.status_code not in [200, 201]:
+                raise Exception(
+                    f"API Error {response.status_code}: {response.text}"
+                )
+
             self.view.log(f"✅ Colorplate tanggal {date_str} ditutup!")
             return True
         except Exception as e:

@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox 
 import datetime
 import threading
+from urllib import response
 
 from config.settings import settings
 from controllers.dashboard_controller import DashboardController
@@ -410,9 +411,12 @@ class DashboardView(tk.Frame):
         date_str = self.date_var.get()
         
         try:
-            success = self.controller.close_colorplate(date_str)
+            response = self.controller.close_colorplate(date_str)
+
+            self.log(f"STATUS: {response.status_code}")
+            self.log(f"RESPONSE: {response.text}")
             
-            if success:
+            if response.status_code == 200:
                 self.log("✅ Colorplate berhasil ditutup!")
             else:
                 self.log("❌ Gagal menutup colorplate")
@@ -420,14 +424,7 @@ class DashboardView(tk.Frame):
         except Exception as e:
             self.log(f"❌ Error: {str(e)}")
             
-        finally:
-            try:
-                if os.path.exists("queue.db"):
-                    os.remove("queue.db")
-                    self.log("🗑️ queue.db berhasil dihapus")
-            except Exception as e:
-                   self.log(f"❌ Gagal menghapus queue.db: {str(e)}")
-
+        finally:  
             self.master.after(0, self.reset_colorplate_button)
 
 
