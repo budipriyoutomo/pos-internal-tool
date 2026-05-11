@@ -86,10 +86,10 @@ class DashboardController:
         
     def close_colorplate(self, date_str):
         try:
-            self.view.log("🔒 Menutup Colorplate...")
+            self.view.log(f"🔒 Menutup Colorplate tanggal {date_str}...")
             self.send_to_api(date_str)
             self.api_client.close_colorplate(date_str)
-            self.view.log("✅ Colorplate ditutup!")
+            self.view.log(f"✅ Colorplate tanggal {date_str} ditutup!")
             return True
         except Exception as e:
             import traceback
@@ -98,57 +98,134 @@ class DashboardController:
             self.view.show_error("Error", str(e))
             return False
         
-    def send_to_api(self, date_str):
+    def send_to_api(self, date_str): 
         try:
-            self.log_info("📤 Menyiapkan data untuk dikirim...")
+
+            self.log_info(f"📤 Menyiapkan data tanggal {date_str}")
 
             last_id = int(get_last_sync() or 0)
+
             print(f"🧠 last_sync: {last_id}")
- 
+
+            # =========================
+            # HEADER
+            # =========================
             headers = TransactionData.get_sales_header(last_id, date_str)
-            print(f"📊 Ditemukan {len(headers)} transaksi baru sejak ID {last_id}")
+
+            print(f"📊 Header ditemukan: {len(headers)}")
 
             if not headers:
                 self.log_warning("Tidak ada header untuk dikirim")
                 return True
- 
+
             if isinstance(headers[0], tuple):
-                raise Exception("Database return tuple, harus dict (fix execute_query)")
- 
+                raise Exception(
+                    "Database return tuple, harus dict (fix execute_query)"
+                )
+
             trx_ids = [h["TransactionID"] for h in headers]
- 
-            details = TransactionData.get_sales_detail(trx_ids)
+
+            print(f"🧾 Transaction IDs:")
+            print(trx_ids)
+
+            # =========================
+            # DETAIL
+            # =========================
+            details = TransactionData.get_sales_detail(
+                trx_ids,
+                date_str
+            )
+
+            print(f"📦 Detail ditemukan: {len(details)}")
 
             if details and isinstance(details[0], tuple):
-                raise Exception("Database return tuple, harus dict (fix execute_query)")
-  
+                raise Exception(
+                    "Database return tuple, harus dict (fix execute_query)"
+                )
+
+            # =========================
+            # DEBUG DETAIL
+            # =========================
+            detail_trx_ids = list(set(
+                d["TransactionID"] for d in details
+            ))
+
+            print("📌 Detail transaction IDs:")
+            print(detail_trx_ids)
+
+            missing_detail = set(trx_ids) - set(detail_trx_ids)
+
+            if missing_detail:
+                print("❌ TRANSACTION TIDAK PUNYA DETAIL:")
+                print(missing_detail)
+
+            # =========================
+            # BUILD PAYLOAD
+            # =========================
             payload = self.build_payload(headers, details)
-            print(payload)
-              
+
             if not payload.get("sales"):
                 self.log_warning("Payload kosong setelah build")
                 return False
 
-            self.log_info(f"📦 Total transaksi: {len(payload['sales'])}")
+            self.log_info(
+                f"📦 Total transaksi payload: {len(payload['sales'])}"
+            )
 
-            # 🔥 DEBUG (optional)
+            # =========================
+            # DEBUG PAYLOAD
+            # =========================
+            payload_trx_ids = [
+                s["transaction_id"]
+                for s in payload["sales"]
+            ]
+
+            print("🚀 Payload transaction IDs:")
+            print(payload_trx_ids)
+
+            missing_payload = set(trx_ids) - set(payload_trx_ids)
+
+            if missing_payload:
+                print("❌ HILANG SAAT BUILD PAYLOAD:")
+                print(missing_payload)
+
             print("PAYLOAD PREVIEW:")
             print(json.dumps(payload["sales"][:1], indent=2))
- 
-            
-            # ✅ masuk queue
-            self.api_client.enqueue_sales(date_str, payload)
- 
-            new_last_id = max(h["ReceiptID"] for h in headers) 
 
-            self.log_success(f"Sync berhasil sampai ID {new_last_id}")
+            # =========================
+            # ENQUEUE
+            # =========================
+            response = self.api_client.enqueue_sales(
+                date_str,
+                payload
+            )
+
+            print("📡 ENQUEUE RESPONSE:")
+            print(response)
+
+            # =========================
+            # UPDATE LAST SYNC
+            # =========================
+            new_last_id = max(
+                h["ReceiptID"]
+                for h in headers
+            )
+
+            self.log_success(
+                f"Sync berhasil sampai ID {new_last_id}"
+            )
 
             update_last_sync(str(new_last_id))
 
             return True
 
         except Exception as e:
+
+            import traceback
+            traceback.print_exc()
+
             self.log_error(f"❌ Error enqueue: {str(e)}")
+
             return False
     
     def save_api_log(self, date_str, result):

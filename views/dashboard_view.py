@@ -1,4 +1,5 @@
 # views/dashboard_view.py
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox 
 import datetime
@@ -420,7 +421,15 @@ class DashboardView(tk.Frame):
             self.log(f"❌ Error: {str(e)}")
             
         finally:
+            try:
+                if os.path.exists("queue.db"):
+                    os.remove("queue.db")
+                    self.log("🗑️ queue.db berhasil dihapus")
+            except Exception as e:
+                   self.log(f"❌ Gagal menghapus queue.db: {str(e)}")
+
             self.master.after(0, self.reset_colorplate_button)
+
 
     def reset_api_button(self):
         """Reset API button state"""

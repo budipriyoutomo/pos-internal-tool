@@ -71,7 +71,7 @@ class APIClient:
 
         return response
     
-    def close_colorplate(self, payload=None):
+    def close_colorplate(self, date_str=None):
         endpoint = f"{self.base_url}/sales/publish"
 
         headers = {
@@ -81,13 +81,11 @@ class APIClient:
             "Content-Type": "application/json",
         }
 
-        # ✅ Default payload kalau tidak dikirim dari luar
-        if payload is None:
-            payload = {
-                "exchange": "posdata_exchange",
-                "routing_key": "posdata.created",
-                "date": date.today().isoformat(),  # otomatis hari ini
-            }
+        payload = {
+            "exchange": "posdata_exchange",
+            "routing_key": "posdata.created",
+            "date": date_str or date.today().isoformat(),
+        }
 
         response = requests.post(
             endpoint,

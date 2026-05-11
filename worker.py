@@ -2,6 +2,7 @@ import time
 import os
 import sys
 import signal
+import traceback
 from core.api_client import APIClient
 from queue_db import init_db
 
@@ -52,6 +53,7 @@ def run_worker():
             client.process_queue()
         except Exception as e:
             print(f"❌ Worker error: {e}")
+            traceback.print_exc()
 
         time.sleep(10)  # interval
 

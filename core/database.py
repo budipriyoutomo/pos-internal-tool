@@ -100,7 +100,7 @@ class TransactionData:
             return db.execute_query(query, (last_id, saledate))
 
     @staticmethod
-    def get_sales_detail(transaction_ids):
+    def get_sales_detail(transaction_ids, date_str):
         if not transaction_ids:
             return []
 
@@ -109,8 +109,8 @@ class TransactionData:
         query = f"""
             SELECT *
             FROM vw_orderdetail
-            WHERE TransactionID IN ({placeholders})
+            WHERE TransactionID IN ({placeholders}) AND  CAST(SaleDate AS DATE) = %s    
         """
 
         with DatabaseConnection() as db:
-            return db.execute_query(query, tuple(transaction_ids))
+            return db.execute_query(query, tuple(transaction_ids) + (date_str,))
