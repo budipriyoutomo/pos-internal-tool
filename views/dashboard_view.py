@@ -411,13 +411,11 @@ class DashboardView(tk.Frame):
         date_str = self.date_var.get()
         
         try:
-            response = self.controller.close_colorplate(date_str)
-
-            self.log(f"STATUS: {response.status_code}")
-            self.log(f"RESPONSE: {response.text}")
+            success = self.controller.close_colorplate(date_str)
+ 
             
-            if response.status_code == 200:
-                self.log("✅ Colorplate berhasil ditutup!")
+            if success:
+                self.log("✅ Silahkan Lanjutkan ke Colorplate App!")
             else:
                 self.log("❌ Gagal menutup colorplate")
                 

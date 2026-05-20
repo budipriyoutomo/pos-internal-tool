@@ -1,5 +1,7 @@
 # controllers/dashboard_controller.py
 import datetime
+import time
+from urllib import response
 from core.database import TransactionData
 from core.report_generator import ReportGenerator
 from core.email_sender import EmailSender
@@ -87,20 +89,30 @@ class DashboardController:
     def close_colorplate(self, date_str):
         try:
             self.view.log(f"🔒 Menutup Colorplate tanggal {date_str}...")
-            self.send_to_api(date_str)
-
-            response = self.api_client.close_colorplate(date_str)
+            send_result = self.send_to_api(date_str)
+            if not send_result:
+                raise Exception("Gagal enqueue sales")
             
-            self.view.log(f"📡 Status API: {response.status_code}")
-            self.view.log(f"📦 Response: {response.text}")
+            max_retry = 30
+            for i in range(max_retry):
 
-            if response.status_code not in [200, 201]:
-                raise Exception(
-                    f"API Error {response.status_code}: {response.text}"
-                )
+                self.view.log(f"⏳ Checking sales publish readiness ({i+1}/{max_retry})")
+                
 
-            self.view.log(f"✅ Colorplate tanggal {date_str} ditutup!")
-            return True
+                response = self.api_client.close_colorplate(date_str) 
+                self.view.log(f"Response: {response.text}")
+                
+                data = response.json()
+
+                # SUCCESS PUBLISH
+                if "published" in data.get("message", "").lower():
+                    self.view.log(f"✅ Colorplate tanggal {date_str} ditutup!")
+                    return True
+
+                time.sleep(2)
+
+            raise Exception("Sales belum siap dipublish")
+
         except Exception as e:
             import traceback
             traceback.print_exc()   # tampilkan error asli di console
@@ -244,8 +256,7 @@ class DashboardController:
             'timestamp': datetime.datetime.now().isoformat(),
             'date': date_str,
             'success': result['success'],
-            'endpoint': result.get('endpoint', 'N/A'),
-            'status_code': result.get('status_code', 'N/A'),
+            'endpoint': result.get('endpoint', 'N/A'), 
             'response': result.get('response', '')
         }
         

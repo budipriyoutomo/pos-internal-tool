@@ -72,14 +72,17 @@ class APIClient:
         return response
     
     def close_colorplate(self, date_str=None):
-        endpoint = f"{self.base_url}/sales/publish"
+        endpoint = f"{self.base_url}/sales/publish?t={time.time()}" 
 
         headers = {
             "Authorization": f"Bearer {settings.get_api_config()['api_key']}",
-            "User-Agent": "PromisePOS-Internal/1.0",
-            "Accept": "application/json",
+            "User-Agent": "PostmanRuntime/7.54.0",
+            "Accept": "*/*",
             "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+            "Connection": "close",
         }
+
 
         payload = {
             "exchange": "posdata_exchange",
@@ -90,10 +93,10 @@ class APIClient:
         response = requests.post(
             endpoint,
             json=payload,
-            headers=headers,
-            timeout=self.timeout,
+            headers=headers, 
+            timeout=30,
         )
-
+  
         return response
     
     # ==============================
