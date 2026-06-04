@@ -30,7 +30,6 @@ class DashboardView(tk.Frame):
         
         # Setup UI
         self.setup_ui()
-        self.start_auto_send()  # Mulai auto send saat view diinisialisasi
         
     def _is_windows(self):
         import platform
@@ -163,6 +162,16 @@ class DashboardView(tk.Frame):
         # LEFT GROUP (tanggal)
         left_group = tk.Frame(btn_wrapper, bg=self.colors['white'])
         left_group.pack(side=tk.LEFT)
+        
+        self.today_btn = create_button(
+            left_group, "Hari Ini", self.set_today, self.colors['accent']
+        )
+        self.today_btn.pack(side=tk.LEFT, padx=5)
+        
+        self.yesterday_btn = create_button(
+            left_group, "Kemarin", self.set_yesterday, self.colors['accent']
+        )
+        self.yesterday_btn.pack(side=tk.LEFT, padx=5)
  
         # RIGHT GROUP (actions)
         right_group = tk.Frame(btn_wrapper, bg=self.colors['white'])
@@ -228,25 +237,7 @@ class DashboardView(tk.Frame):
         # Status bar di dalam dashboard
         self.create_status_bar()
     
-    def start_auto_send(self):
-        """Mulai auto send tiap 5 menit"""
-        self.master.after(300000, self.auto_send_api)
 
-    def auto_send_api(self):
-        """Auto kirim API tiap 5 menit"""
-        if not self.is_processing:
-            self.log("⏰ Auto trigger: Kirim data ke API")
-            self.send_api_silent()
-
-        self.start_auto_send()
-
-    def send_api_silent(self):
-        """Kirim API otomatis tanpa konfirmasi"""
-        self.is_processing = True 
-        self.set_status("Auto mengirim ke API...")
-
-        thread = threading.Thread(target=self.run_send_api, daemon=True)
-        thread.start()
         
     def darken_color(self, hex_color, factor=0.85):
         """Helper to darken a hex color for hover/active states"""

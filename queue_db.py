@@ -45,6 +45,16 @@ def init_db():
     conn.commit()
     conn.close()
 
+def recreate_db():
+    if os.path.exists(DB_NAME):
+        try:
+            os.remove(DB_NAME)
+            print(f"🗑️ Database lama dihapus: {DB_NAME}")
+        except Exception as e:
+            print(f"⚠️ Gagal menghapus database lama: {e}")
+    init_db()
+    print("🆕 Database baru berhasil dibuat")
+
 
 # ==============================
 # 📥 INSERT QUEUE

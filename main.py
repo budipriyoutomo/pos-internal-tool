@@ -8,9 +8,24 @@ Main application entry point
 import sys
 import os
 import locale
-from queue_db import init_db 
+import subprocess
+from queue_db import recreate_db 
 
-init_db()  # pastikan database queue siap
+recreate_db()  # Buat database queue baru setiap kali aplikasi dibuka
+
+# Hapus file lock worker jika tertinggal
+if getattr(sys, 'frozen', False):
+    base_dir = os.path.dirname(sys.executable)
+else:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+lock_file = os.path.join(base_dir, "worker.lock")
+if os.path.exists(lock_file):
+    try:
+        os.remove(lock_file)
+        print(f"🧹 Leftover lock file removed: {lock_file}")
+    except Exception as e:
+        print(f"⚠️ Failed to remove leftover lock: {e}")
 
 os.environ["LC_ALL"] = "en_US.UTF-8"
 os.environ["LANG"] = "en_US.UTF-8"
@@ -59,9 +74,50 @@ class PromisePOSApp(tk.Tk):
         # Bind keyboard shortcuts
         self.bind_shortcuts()
         
+        # Start background worker
+        self.start_worker()
+        
         print(f"✅ {settings.APP_NAME} started")
         print(f"📐 Window size: {self.window_width}x{self.window_height}")
     
+    def start_worker(self):
+        """Mulai background worker.py sebagai subprocess"""
+        try:
+            if getattr(sys, 'frozen', False):
+                # Cari di _MEIPASS (jika onefile bundle) atau di folder exe (jika onedir)
+                base_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+                worker_exe = os.path.join(base_dir, "worker.exe")
+                if os.path.exists(worker_exe):
+                    self.worker_process = subprocess.Popen(
+                        [worker_exe],
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                    )
+                else:
+                    # Fallback jika worker.exe diletakkan di luar folder bundel (di folder exe yang sama)
+                    exe_dir = os.path.dirname(sys.executable)
+                    worker_exe_fallback = os.path.join(exe_dir, "worker.exe")
+                    if os.path.exists(worker_exe_fallback):
+                        self.worker_process = subprocess.Popen(
+                            [worker_exe_fallback],
+                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        )
+                    else:
+                        worker_script = os.path.join(exe_dir, "worker.py")
+                        self.worker_process = subprocess.Popen(
+                            [sys.executable, worker_script],
+                            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+                        )
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                worker_script = os.path.join(base_dir, "worker.py")
+                self.worker_process = subprocess.Popen(
+                    [sys.executable, worker_script]
+                )
+            print("🚀 Worker process started successfully")
+        except Exception as e:
+            print(f"❌ Failed to start worker process: {e}")
+            self.worker_process = None
+
     def set_window_size(self):
         """Set window size to 1/3 of screen"""
         screen_width = self.winfo_screenwidth()
@@ -277,6 +333,16 @@ Shortcut:
             # Log shutdown
             print("🔄 Shutting down application...")
             
+            # Hentikan worker subprocess
+            if hasattr(self, 'worker_process') and self.worker_process:
+                print("🔄 Terminating worker process...")
+                try:
+                    self.worker_process.terminate()
+                    self.worker_process.wait(timeout=3)
+                except Exception as ex:
+                    print(f"⚠️ Error terminating worker: {ex}")
+                print("✅ Worker process terminated")
+
             # Ask confirmation jika ada proses running
             if hasattr(self.dashboard, 'is_processing') and self.dashboard.is_processing:
                 if not messagebox.askyesno("Konfirmasi", "Ada proses sedang berjalan. Yakin ingin keluar?"):
