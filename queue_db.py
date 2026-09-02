@@ -45,6 +45,17 @@ def init_db():
     conn.commit()
     conn.close()
 
+def ensure_tables():
+    """Pastikan tabel ada; murah karena semua CREATE-nya IF NOT EXISTS."""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM queue LIMIT 1")
+        conn.close()
+    except sqlite3.OperationalError:
+        init_db()
+
+
 def recreate_db():
     if os.path.exists(DB_NAME):
         try:
@@ -76,6 +87,10 @@ def insert_queue(payload: str):
 # 📤 GET PENDING
 # ==============================
 def get_pending(limit=10):
+    # Tabel bisa hilang kalau queue.db dihapus/diganti saat worker jalan;
+    # buat ulang lalu lanjut, jangan sampai worker mati karenanya.
+    ensure_tables()
+
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
 
@@ -90,6 +105,26 @@ def get_pending(limit=10):
     rows = c.fetchall()
     conn.close()
     return rows
+
+
+# ==============================
+# 📊 QUEUE STATS
+# ==============================
+def queue_stats():
+    """(jumlah pending, retry tertinggi) — dipakai GUI untuk memantau worker."""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT COUNT(*), COALESCE(MAX(retry_count), 0)
+        FROM queue
+        WHERE status='pending'
+    """)
+
+    row = c.fetchone()
+    conn.close()
+
+    return (row[0], row[1]) if row else (0, 0)
 
 
 # ==============================

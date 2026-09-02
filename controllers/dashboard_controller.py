@@ -1,5 +1,6 @@
 # controllers/dashboard_controller.py
 import datetime
+import os
 import time
 from urllib import response
 from core.database import TransactionData
@@ -7,13 +8,120 @@ from core.report_generator import ReportGenerator
 from core.email_sender import EmailSender
 from config.settings import settings
 from core.api_client import APIClient
-from queue_db import ( 
-    get_last_sync,
-    update_last_sync
+from core.worker_lock import worker_running
+from queue_db import (
+    get_base_path,
+    queue_stats
 )
 
 import json
     
+def _to_iso(value):
+    """Datetime/date -> ISO string, None tetap None."""
+    if not value:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _date_only(value):
+    """
+    Tanggal saja, tanpa jam: "2026-08-31".
+
+    Kolom SaleDate di view berupa DATETIME, sehingga str() menghasilkan
+    "2026-08-31 00:00:00" — tidak cocok dengan tanggal yang dipakai endpoint
+    /sales/publish ("2026-08-31").
+    """
+    if value is None or value == "":
+        return None
+
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+
+    text = str(value).strip()
+
+    # "2026-08-31 00:00:00" / "2026-08-31T00:00:00" -> "2026-08-31"
+    for pisah in (" ", "T"):
+        if pisah in text:
+            return text.split(pisah, 1)[0]
+
+    return text
+
+
+def _group(value):
+    """
+    Samakan penamaan product group dengan yang diharapkan server.
+
+    Master data TSTSM menulis "COLOR PLATE" (pakai spasi), sedangkan
+    /api/sales/publish menyaring persis "COLORPLATE" — akibatnya seluruh item
+    colorplate outlet itu tidak pernah ikut terpublish.
+    """
+    teks = _text(value)
+
+    if teks.replace(" ", "").upper() == "COLORPLATE":
+        return "COLORPLATE"
+
+    return teks
+
+
+def _text(value, default=""):
+    """String, NULL -> default (bukan literal "None")."""
+    if value is None:
+        return default
+    return str(value)
+
+
+def _to_float(value, default=0.0):
+    """float() yang aman terhadap kolom NULL / string kosong dari DB."""
+    if value is None or value == "":
+        return float(default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _to_int(value, default=0):
+    """int() yang aman terhadap kolom NULL / string kosong / desimal dari DB."""
+    if value is None or value == "":
+        return int(default)
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+# Kolom yang dibaca dari vw_ordertransaction / vw_orderdetail. Dipakai untuk
+# memperingatkan kalau nama kolom di view tidak sesuai — tanpa ini kolom yang
+# hilang diam-diam jadi 0 atau "".
+HEADER_FIELDS = (
+    "TransactionID", "ReferenceNo", "SaleDate", "PaidTime", "CloseTime",
+    "ShopID", "TransactionStatusID", "SaleMode", "NoCustomer", "Deleted",
+    "ReceiptID", "ReceiptMonth", "ReceiptYear",
+    "ReceiptProductRetailPrice", "ReceiptSalePrice", "ReceiptPayPrice",
+    "ReceiptDiscount", "ReceiptTotalAmount",
+    "OtherPercentDiscount", "OtherAmountDiscount",
+    "VATPercent", "TransactionVAT", "TransactionExcludeVAT",
+    "TransactionVATable",
+    "ServiceChargePercent", "ServiceCharge", "ServiceChargeVAT",
+    "OtherIncome", "OtherIncomeVAT",
+    "OpenStaffID", "PaidStaffID", "CommStaffID",
+    "VoidStaffID", "VoidReason", "VoidTime",
+    "TransactionNote", "QueueName",
+    "IsSplitTransaction", "IsFromOtherTransaction",
+)
+
+DETAIL_FIELDS = (
+    "TransactionID", "OrderDetailID", "SaleDate",
+    "ProductID", "ProductName", "ProductGroupName", "ProductDeptName",
+    "ProductSetType", "OrderStatusID", "SaleMode",
+    "Amount", "Price", "RetailPrice", "MinimumPrice",
+    "Comment", "OrderStaffID", "OrderTableID", "VoidStaffID",
+)
+
+
 class DashboardController:
     def __init__(self, view):
         self.view = view
@@ -89,29 +197,46 @@ class DashboardController:
     def close_colorplate(self, date_str):
         try:
             self.view.log(f"🔒 Menutup Colorplate tanggal {date_str}...")
-            send_result = self.send_to_api(date_str)
-            if not send_result:
+
+            if not self.send_to_api(date_str):
                 raise Exception("Gagal enqueue sales")
-            
+
+            # enqueue_sales() hanya menulis ke queue lokal; upload ke server
+            # dikerjakan worker di proses terpisah. Tanpa menunggu queue kosong,
+            # /sales/publish pasti menjawab "No sales data to publish".
+            if not self.wait_for_queue_drain():
+                raise Exception(
+                    "Data belum sampai ke server, publish dibatalkan"
+                )
+
             max_retry = 30
+            pesan_terakhir = ""
+
             for i in range(max_retry):
 
                 self.view.log(f"⏳ Checking sales publish readiness ({i+1}/{max_retry})")
-                
 
-                response = self.api_client.close_colorplate(date_str) 
+                response = self.api_client.close_colorplate(date_str)
                 self.view.log(f"Response: {response.text}")
-                
+
                 data = response.json()
+                pesan_terakhir = data.get("message", "") or ""
 
                 # SUCCESS PUBLISH
-                if "published" in data.get("message", "").lower():
+                if "published" in pesan_terakhir.lower():
                     self.view.log(f"✅ Colorplate tanggal {date_str} ditutup!")
                     return True
 
                 time.sleep(2)
 
-            raise Exception("Sales belum siap dipublish")
+            # Bawa jawaban server apa adanya — "belum siap" saja menyembunyikan
+            # alasan sebenarnya, padahal server sudah menyebutkannya.
+            raise Exception(
+                f"Server menolak publish setelah {max_retry} percobaan. "
+                f"Jawaban terakhir: \"{pesan_terakhir}\". "
+                "Data sudah masuk ke server, jadi masalahnya ada di syarat "
+                "publish sisi server — bukan pengiriman."
+            )
 
         except Exception as e:
             import traceback
@@ -120,25 +245,83 @@ class DashboardController:
             self.view.show_error("Error", str(e))
             return False
         
+    def wait_for_queue_drain(self, timeout=300, interval=2):
+        """
+        Tunggu worker mengosongkan queue lokal.
+
+        False kalau worker tidak jalan, berhenti di tengah jalan, atau data
+        tidak terkirim sampai timeout.
+        """
+        pending, _ = queue_stats()
+
+        if pending == 0:
+            return True
+
+        if not worker_running():
+            self.log_error(
+                "Worker tidak berjalan — data tertahan di queue lokal. "
+                "Tutup aplikasi lalu buka lagi, atau jalankan worker.exe manual."
+            )
+            return False
+
+        self.log_info(
+            f"📡 Menunggu worker mengirim {pending} batch ke server..."
+        )
+
+        deadline = time.time() + timeout
+        reported_retry = 0
+
+        while time.time() < deadline:
+            pending, max_retry = queue_stats()
+
+            if pending == 0:
+                self.log_success("Semua data terkirim ke server")
+                return True
+
+            if max_retry > reported_retry:
+                reported_retry = max_retry
+                self.log_warning(
+                    f"Worker gagal mengirim (percobaan ke-{max_retry}) — "
+                    "detail ada di logs/worker.log"
+                )
+
+            if not worker_running():
+                self.log_error(
+                    "Worker berhenti saat pengiriman — cek logs/worker.log"
+                )
+                return False
+
+            time.sleep(interval)
+
+        self.log_error(
+            f"Timeout {timeout} detik, {pending} batch masih tertahan di queue"
+        )
+        return False
+
     def send_to_api(self, date_str): 
         try:
 
             self.log_info(f"📤 Menyiapkan data tanggal {date_str}")
 
-            last_id = int(get_last_sync() or 0)
-
-            print(f"🧠 last_sync: {last_id}")
-
             # =========================
             # HEADER
             # =========================
-            headers = TransactionData.get_sales_header(last_id, date_str)
+            # Selalu ambil SELURUH transaksi tanggal ini, tanpa saringan
+            # ReceiptID. Watermark last_sync global tidak bisa dipakai di sini:
+            # ReceiptID hanya menaik dalam satu bulan (ada kolom ReceiptMonth /
+            # ReceiptYear), sehingga menutup tanggal yang lebih lama atau
+            # tanggal di bulan baru akan menghasilkan 0 baris dan gagal diam-
+            # diam. Server melakukan upsert, jadi mengirim ulang aman sekaligus
+            # membuat koreksi transaksi lama ikut terkirim.
+            headers = TransactionData.get_sales_header(0, date_str)
 
             print(f"📊 Header ditemukan: {len(headers)}")
 
             if not headers:
-                self.log_warning("Tidak ada header untuk dikirim")
-                return True
+                self.log_error(
+                    f"Tidak ada transaksi untuk tanggal {date_str}"
+                )
+                return False
 
             if isinstance(headers[0], tuple):
                 raise Exception(
@@ -159,6 +342,8 @@ class DashboardController:
             )
 
             print(f"📦 Detail ditemukan: {len(details)}")
+
+            self.dump_source_sample(date_str, headers, details)
 
             if details and isinstance(details[0], tuple):
                 raise Exception(
@@ -222,22 +407,24 @@ class DashboardController:
                 payload
             )
 
-            print("📡 ENQUEUE RESPONSE:")
-            print(response)
+            if not response.get("success"):
+                self.log_error(
+                    f"Gagal memasukkan ke queue: {response.get('error')}"
+                )
+                return False
 
-            # =========================
-            # UPDATE LAST SYNC
-            # =========================
             new_last_id = max(
                 h["ReceiptID"]
                 for h in headers
             )
 
-            self.log_success(
-                f"Sync berhasil sampai ID {new_last_id}"
+            # last_sync sengaja TIDAK dinaikkan di sini. Data baru masuk queue
+            # lokal, belum sampai server — worker yang menaikkannya setelah
+            # server membalas 2xx.
+            self.log_info(
+                f"📥 {len(payload['sales'])} transaksi masuk queue "
+                f"(s/d ReceiptID {new_last_id}), menunggu worker mengirim..."
             )
-
-            update_last_sync(str(new_last_id))
 
             return True
 
@@ -282,110 +469,235 @@ class DashboardController:
         for s in suggestions:
             self.log_warning(s)
 
+    def dump_source_sample(self, date_str, headers, details):
+        """
+        Simpan struktur baris mentah dari view ke logs/.
+
+        Dipakai untuk memastikan kolom yang dibaca payload memang ada dan
+        berisi — kalau close_time / receipt_total_amount kosong di payload,
+        file ini menunjukkan apakah sumbernya yang NULL atau nama kolomnya
+        yang berbeda.
+        """
+        try:
+            log_dir = os.path.join(get_base_path(), "logs")
+            os.makedirs(log_dir, exist_ok=True)
+
+            path = os.path.join(log_dir, f"source_sample_{date_str}.json")
+
+            def profil(rows):
+                if not rows:
+                    return {"jumlah_baris": 0}
+
+                kolom = list(rows[0].keys())
+
+                return {
+                    "jumlah_baris": len(rows),
+                    "kolom": kolom,
+                    "null_di_semua_baris": [
+                        k for k in kolom
+                        if all(r.get(k) is None for r in rows)
+                    ],
+                    "contoh_baris": rows[0],
+                }
+
+            data = {
+                "tanggal": date_str,
+                "header": profil(headers),
+                "detail": profil(details),
+            }
+
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+
+            self.log_info(f"🔬 Struktur sumber disimpan: {path}")
+
+        except Exception as e:
+            self.log_warning(f"Gagal menyimpan struktur sumber: {e}")
+
+    def warn_incomplete_sales(self, sales):
+        """
+        Peringatkan pola yang membuat server tidak mem-publish.
+
+        Dibanding outlet yang publish-nya berhasil (close_time terisi di
+        105/105 transaksi), outlet yang gagal punya close_time kosong di
+        272/272. Dua kolom di bawah ini yang membedakan keduanya.
+        """
+        if not sales:
+            return
+
+        if not any(s.get("close_time") for s in sales):
+            self.log_warning(
+                f"close_time KOSONG di seluruh {len(sales)} transaksi. "
+                "Kemungkinan besar hari itu belum di-close di POS — server "
+                "hanya mem-publish transaksi yang sudah close."
+            )
+
+        if not any(s.get("receipt_total_amount") for s in sales):
+            self.log_warning(
+                f"receipt_total_amount 0 di seluruh {len(sales)} transaksi — "
+                "cek kolom ReceiptTotalAmount di vw_ordertransaction."
+            )
+
+    def warn_missing_columns(self, rows, expected, label):
+        """Peringatkan kalau view tidak punya kolom yang dibaca payload."""
+        if not rows:
+            return
+
+        missing = [c for c in expected if c not in rows[0]]
+
+        if missing:
+            self.log_warning(
+                f"Kolom {label} tidak ada di view, nilainya dikirim sebagai "
+                f"default: {', '.join(missing)}"
+            )
+
     def build_payload(self, headers, details):
 
-        def to_iso(dt):
-            if not dt:
-                return None
-            return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
-
         detail_map = {}
-        self.log_error("🔹 Membangun payload untuk API...")
+        null_id_rows = []
+        grup_disamakan = {}
+        self.log_info("🔹 Membangun payload untuk API...")
+
+        self.warn_missing_columns(headers, HEADER_FIELDS, "header")
+        self.warn_missing_columns(details, DETAIL_FIELDS, "detail")
+
         # 🔹 mapping detail ke item (SUDAH SESUAI FORMAT BARU)
         for d in details:
-            trx_id = int(d["TransactionID"])
+            trx_id = _to_int(d.get("TransactionID"))
+
+            if not trx_id or d.get("OrderDetailID") is None or d.get("ProductID") is None:
+                null_id_rows.append(
+                    f"detail trx={d.get('TransactionID')} "
+                    f"detail_id={d.get('OrderDetailID')} "
+                    f"product_id={d.get('ProductID')}"
+                )
 
             if trx_id not in detail_map:
                 detail_map[trx_id] = []
 
+            price = _to_float(d.get("Price"))
+
+            grup_asli = _text(d.get("ProductGroupName"))
+            grup = _group(d.get("ProductGroupName"))
+
+            if grup != grup_asli:
+                grup_disamakan[grup_asli] = grup_disamakan.get(grup_asli, 0) + 1
+
             detail_map[trx_id].append({
-                "order_detail_id": int(d["OrderDetailID"]),  # ✅ rename
+                "order_detail_id": _to_int(d.get("OrderDetailID")),  # ✅ rename
                 "transaction_id": trx_id,
-                "sale_date": str(d.get("SaleDate")),
+                "sale_date": _date_only(d.get("SaleDate")),
 
-                "product_id": int(d["ProductID"]),
-                "product_name": str(d.get("ProductName")),
-                "product_group": str(d.get("ProductGroupName")),
-                "product_dept": str(d.get("ProductDeptName")),
+                "product_id": _to_int(d.get("ProductID")),
+                "product_name": _text(d.get("ProductName")),
+                "product_group": grup,
+                "product_dept": _text(d.get("ProductDeptName")),
 
-                "product_set_type": int(d.get("ProductSetType", 0)),
-                "order_status_id": int(d.get("OrderStatusID", 2)),
-                "sale_mode": int(d.get("SaleMode", 1)),
+                "product_set_type": _to_int(d.get("ProductSetType")),
+                "order_status_id": _to_int(d.get("OrderStatusID"), 2),
+                "sale_mode": _to_int(d.get("SaleMode"), 1),
 
-                "qty": float(d["Amount"]),
-                "price": float(d["Price"]),
-                "retail_price": float(d.get("RetailPrice", d.get("Price", 0))),
-                "minimum_price": float(d.get("MinimumPrice", 0)),
+                "qty": _to_float(d.get("Amount")),
+                "price": price,
+                "retail_price": _to_float(d.get("RetailPrice"), price),
+                "minimum_price": _to_float(d.get("MinimumPrice")),
 
-                "comment": d.get("Comment") or "",
-                "order_staff_id": int(d.get("OrderStaffID", 0)),
-                "order_table_id": int(d.get("OrderTableID", 0)),
-                "void_staff_id": int(d.get("VoidStaffID", 0)),
+                "comment": _text(d.get("Comment")),
+                "order_staff_id": _to_int(d.get("OrderStaffID")),
+                "order_table_id": _to_int(d.get("OrderTableID")),
+                "void_staff_id": _to_int(d.get("VoidStaffID")),
             })
 
         result = []
 
         # 🔹 mapping header ke sales (SUDAH FULL SESUAI SPEC)
         for h in headers:
-            trx_id = int(h["TransactionID"]) 
+            trx_id = _to_int(h.get("TransactionID"))
 
-            paid_time = to_iso(h.get("PaidTime"))
+            if not trx_id:
+                null_id_rows.append(
+                    f"header ref={h.get('ReferenceNo')} "
+                    f"trx={h.get('TransactionID')}"
+                )
+
+            paid_time = _to_iso(h.get("PaidTime"))
 
             result.append({
-                "transaction_id": trx_id,  # ✅ rename 
+                "transaction_id": trx_id,  # ✅ rename
                 "invoice_number": h.get("ReferenceNo"),  # ✅ rename
 
-                "sale_date": str(h.get("SaleDate")),
+                "sale_date": _date_only(h.get("SaleDate")),
                 "paid_time": paid_time,
-                "close_time": to_iso(h.get("CloseTime")),
+                "close_time": _to_iso(h.get("CloseTime")),
                 "trx_date": paid_time,  # ✅ tambahan WAJIB
 
-                "shop_id": int(h.get("ShopID", 0)),
-                "transaction_status_id": int(h.get("TransactionStatusID", 1)),
-                "sale_mode": int(h.get("SaleMode", 1)),
-                "no_customer": int(h.get("NoCustomer", 1)),
-                "deleted": int(h.get("Deleted", 0)),
+                "shop_id": _to_int(h.get("ShopID")),
+                "transaction_status_id": _to_int(h.get("TransactionStatusID"), 1),
+                "sale_mode": _to_int(h.get("SaleMode"), 1),
+                "no_customer": _to_int(h.get("NoCustomer"), 1),
+                "deleted": _to_int(h.get("Deleted")),
 
-                "receipt_id": int(h.get("ReceiptID", 0)),
-                "receipt_month": int(h.get("ReceiptMonth", 0)),
-                "receipt_year": int(h.get("ReceiptYear", 0)),
-                
-                "receipt_product_retail_price": float(h.get("ReceiptProductRetailPrice", 0)),
-                "receipt_sale_price": float(h.get("ReceiptSalePrice", 0)),
-                "receipt_pay_price": float(h.get("ReceiptPayPrice", 0)),
-                "receipt_discount": float(h.get("ReceiptDiscount", 0)),
-                "receipt_total_amount": float(h.get("ReceiptTotalAmount", 0)),
+                "receipt_id": _to_int(h.get("ReceiptID")),
+                "receipt_month": _to_int(h.get("ReceiptMonth")),
+                "receipt_year": _to_int(h.get("ReceiptYear")),
 
-                "other_percent_discount": float(h.get("OtherPercentDiscount", 0)),
-                "other_amount_discount": float(h.get("OtherAmountDiscount", 0)),
+                "receipt_product_retail_price": _to_float(h.get("ReceiptProductRetailPrice")),
+                "receipt_sale_price": _to_float(h.get("ReceiptSalePrice")),
+                "receipt_pay_price": _to_float(h.get("ReceiptPayPrice")),
+                "receipt_discount": _to_float(h.get("ReceiptDiscount")),
+                "receipt_total_amount": _to_float(h.get("ReceiptTotalAmount")),
 
-                "vat_percent": float(h.get("VATPercent", 0)),
-                "transaction_vat": float(h.get("TransactionVAT", 0)),
-                "transaction_exclude_vat": float(h.get("TransactionExcludeVAT", 0)),
-                "transaction_vatable": float(h.get("TransactionVATable", 0)),
+                "other_percent_discount": _to_float(h.get("OtherPercentDiscount")),
+                "other_amount_discount": _to_float(h.get("OtherAmountDiscount")),
 
-                "service_charge_percent": float(h.get("ServiceChargePercent", 0)),
-                "service_charge": float(h.get("ServiceCharge", 0)),
-                "service_charge_vat": float(h.get("ServiceChargeVAT", 0)),
+                "vat_percent": _to_float(h.get("VATPercent")),
+                "transaction_vat": _to_float(h.get("TransactionVAT")),
+                "transaction_exclude_vat": _to_float(h.get("TransactionExcludeVAT")),
+                "transaction_vatable": _to_float(h.get("TransactionVATable")),
 
-                "other_income": float(h.get("OtherIncome", 0)),
-                "other_income_vat": float(h.get("OtherIncomeVAT", 0)),
+                "service_charge_percent": _to_float(h.get("ServiceChargePercent")),
+                "service_charge": _to_float(h.get("ServiceCharge")),
+                "service_charge_vat": _to_float(h.get("ServiceChargeVAT")),
 
-                "void_staff_id": int(h.get("VoidStaffID", 0)),
-                "void_reason": h.get("VoidReason") or "",
-                "void_time": to_iso(h.get("VoidTime")),
+                "other_income": _to_float(h.get("OtherIncome")),
+                "other_income_vat": _to_float(h.get("OtherIncomeVAT")),
 
-                "transaction_note": h.get("TransactionNote") or "",
-                "queue_name": h.get("QueueName") or "",
+                # Ada di SalesSchema tapi sebelumnya tidak pernah dikirim,
+                # sehingga selalu tersimpan sebagai 0 di server.
+                "open_staff_id": _to_int(h.get("OpenStaffID")),
+                "paid_staff_id": _to_int(h.get("PaidStaffID")),
+                "comm_staff_id": _to_int(h.get("CommStaffID")),
+
+                "void_staff_id": _to_int(h.get("VoidStaffID")),
+                "void_reason": _text(h.get("VoidReason")),
+                "void_time": _to_iso(h.get("VoidTime")),
+
+                "transaction_note": _text(h.get("TransactionNote")),
+                "queue_name": _text(h.get("QueueName")),
                 "reference_no": h.get("ReferenceNo"),
 
-                "is_split_transaction": int(h.get("IsSplitTransaction", 0)),
-                "is_from_other_transaction": int(h.get("IsFromOtherTransaction", 0)),
+                "is_split_transaction": _to_int(h.get("IsSplitTransaction")),
+                "is_from_other_transaction": _to_int(h.get("IsFromOtherTransaction")),
 
                 # 🔥 RELATION
                 "items": detail_map.get(trx_id, [])
             })
 
-        return { 
+        if grup_disamakan:
+            rincian = ", ".join(
+                f"{asli!r} → 'COLORPLATE' ({n} item)"
+                for asli, n in grup_disamakan.items()
+            )
+            self.log_info(f"🎨 Nama product group disamakan: {rincian}")
+
+        self.warn_incomplete_sales(result)
+
+        if null_id_rows:
+            self.log_warning(
+                f"{len(null_id_rows)} baris punya ID NULL (dikirim sebagai 0): "
+                + "; ".join(null_id_rows[:5])
+            )
+
+        return {
             "sales": result
         }

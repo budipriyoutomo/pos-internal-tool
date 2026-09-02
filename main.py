@@ -9,23 +9,23 @@ import sys
 import os
 import locale
 import subprocess
-from queue_db import recreate_db 
+from queue_db import init_db, queue_stats
 
-recreate_db()  # Buat database queue baru setiap kali aplikasi dibuka
+# JANGAN hapus queue.db di sini. Selain membuang batch yang belum terkirim,
+# menghapusnya juga mereset last_sync sehingga seluruh transaksi hari itu
+# dikirim ulang setiap aplikasi dibuka (server mencatatnya sebagai insert baru).
+init_db()
 
-# Hapus file lock worker jika tertinggal
-if getattr(sys, 'frozen', False):
-    base_dir = os.path.dirname(sys.executable)
-else:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+_pending, _retry = queue_stats()
+if _pending:
+    print(f"📦 {_pending} batch masih tertahan di queue (retry tertinggi {_retry})")
 
-lock_file = os.path.join(base_dir, "worker.lock")
-if os.path.exists(lock_file):
-    try:
-        os.remove(lock_file)
-        print(f"🧹 Leftover lock file removed: {lock_file}")
-    except Exception as e:
-        print(f"⚠️ Failed to remove leftover lock: {e}")
+# Hapus lock worker HANYA kalau proses pemiliknya sudah mati — menghapusnya
+# secara buta bisa membuat dua worker jalan bersamaan.
+from core.worker_lock import LOCK_FILE, clear_stale_lock, worker_running
+
+if clear_stale_lock():
+    print(f"🧹 Leftover lock file removed: {LOCK_FILE}")
 
 os.environ["LC_ALL"] = "en_US.UTF-8"
 os.environ["LANG"] = "en_US.UTF-8"
@@ -82,6 +82,11 @@ class PromisePOSApp(tk.Tk):
     
     def start_worker(self):
         """Mulai background worker.py sebagai subprocess"""
+        if worker_running():
+            print("ℹ️ Worker sudah berjalan, tidak perlu start ulang")
+            self.worker_process = None
+            return
+
         try:
             if getattr(sys, 'frozen', False):
                 # Cari di _MEIPASS (jika onefile bundle) atau di folder exe (jika onedir)
