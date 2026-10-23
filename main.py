@@ -137,7 +137,7 @@ class PromisePOSApp(tk.Tk):
             self.window_height = 700
         
         self.geometry(f"{self.window_width}x{self.window_height}")
-        self.minsize(800, 600)
+        self.minsize(860, 660)
         
         print(f"🖥️  Screen: {screen_width}x{screen_height}")
         print(f"📐 Window: {self.window_width}x{self.window_height}")

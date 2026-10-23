@@ -48,6 +48,21 @@ class Settings:
             'white': '#ffffff',       # White - Cards
             'text': '#1f2937',        # Gray 800
             'border': '#e5e7eb',      # Gray 200
+            'muted': '#6b7280',       # Gray 500 - Teks sekunder
+            'disabled': '#d1d5db',    # Gray 300 - Tombol nonaktif
+            'disabled_text': '#9ca3af',  # Gray 400
+            'header_sub': '#a5b4fc',  # Indigo 300 - Subjudul header
+            'primary_soft': '#eef2ff',   # Indigo 50 - Chip / badge
+            'success_soft': '#ecfdf5',   # Emerald 50
+            'warning_soft': '#fffbeb',   # Amber 50
+            'danger_soft': '#fef2f2',    # Red 50
+            # Panel log
+            'log_bg': '#0f172a',      # Slate 900
+            'log_text': '#e2e8f0',    # Slate 200
+            'log_muted': '#64748b',   # Slate 500 - Timestamp
+            'log_success': '#34d399', # Emerald 400
+            'log_warning': '#fbbf24', # Amber 400
+            'log_error': '#f87171',   # Red 400
         }
     
     def load_config(self):
