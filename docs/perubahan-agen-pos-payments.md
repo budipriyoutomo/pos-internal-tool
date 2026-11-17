@@ -81,7 +81,7 @@ Struktur kolom pembayaran (dari hasil `SHOW COLUMNS`):
 | Kunci baris (PK) | `paydetail` (`PayDetailID`, `TransactionID`, `ComputerID`) | `orderpaydetail` (`PayDetailID`, `TransactionID`, `ComputerID`) |
 | Jenis bayar | `PayTypeID` | `PayTypeID` (ada juga `OrgPayTypeID`) |
 | Nominal | `Amount` | `PayAmount` |
-| Uang diserahkan / kembalian | tidak ada kolomnya | `Paid` (decimal), `CashChange` |
+| Uang diserahkan / kembalian | tidak ada kolomnya | `CashChange` = kembalian. `Paid` selalu 0, tidak dipakai (3.6). |
 | Tanggal | tidak ada, ambil dari `ordertransaction` | `SaleDate` (datetime) |
 | EDC | `IsFromEDC` | `IsFromEDC` |
 | Nomor kartu (**jangan dikirim**) | `CreditCardNo`, `CardHolderName` | `CreditCardNo`, `CardNo`, `CreditCardHolderName` |
@@ -137,8 +137,9 @@ GROUP BY a.TransactionID, a.ComputerID, a.ReceiptPayPrice
 HAVING ABS(a.ReceiptPayPrice - total_amount) > 0.5;
 ```
 
-**Vtec**: ada `PayAmount`, `Paid` dan `CashChange`. Dugaan: `PayAmount` =
-nominal bersih, `Paid` = uang diserahkan, `CashChange` = `Paid − PayAmount`.
+**Vtec**: ada `PayAmount`, `Paid` dan `CashChange`. Hasilnya (3.6):
+`PayAmount` = nominal bersih, `CashChange` = kembalian, sehingga uang yang
+diserahkan tamu = `PayAmount + CashChange`. `Paid` selalu 0.
 
 ```sql
 -- Contoh baris tunai yang ada kembaliannya
@@ -280,8 +281,49 @@ Catatan dari daftar jenis bayar Promise:
   (`PayTypeName`) lebih stabil, tetapi tetap perlu dibandingkan antar outlet
   **Promise** (pertanyaan #2).
 
-Langkah 0 untuk **Promise selesai**. Yang belum: seluruh pengecekan **Vtec**
-(3.1–3.4), terutama arti `PayAmount`, `Paid` dan `CashChange`.
+Langkah 0 untuk **Promise selesai**.
+
+### 3.6 Hasil: Vtec (17 November 2026)
+
+Dijalankan dari agen, hanya membaca, ke satu server Vtec (database `tom`,
+MySQL 5.7.12, `ComputerID` 60, 61, 62). Rentang 30 hari: 18 Oktober–16
+November 2026, 6.293 transaksi, semuanya `TransactionStatusID = 2`,
+`Deleted = 0`.
+
+| Cek | Hasil | Arti |
+|---|---|---|
+| Draf view (SELECT-nya) | Jalan, kolom keluaran sesuai 4.1 | Join `orderpaydetail.PayTypeID = paytype.PayTypeID` benar |
+| Σ `PayAmount` vs `ReceiptPayPrice` | **Cocok di 30 dari 30 hari**, 0 transaksi selisih | `PayAmount` adalah **nominal bersih**. View Vtec sudah memakai kolom yang benar. |
+| Transaksi tanpa pembayaran | 0 | – |
+| `Paid` / `CashChange` | `Paid` = 0 di **6.318 dari 6.318** baris. `CashChange` terisi di 601 baris (tunai), mis. `PayAmount` 44.000 + `CashChange` 56.000 = uang 100.000. | `CashChange` adalah kembalian dan **tidak** termasuk di `PayAmount`. `Paid` tidak dipakai, jadi tidak dimasukkan ke view. |
+| Transaksi multi-pembayaran | 6.268 trx 1 baris, 25 trx 2 baris | – |
+| Pembayaran nominal ≤ 0 | 1 baris CC BRI (`PayTypeID` 10050) bernilai 0 | Tidak mengganggu Σ. Dikirim apa adanya. |
+| `orderpaydetail.SaleDate` vs header | Selalu sama (0 beda) | Filter tanggal dari header aman |
+| Jenis bayar tanpa master | 0 | `LEFT JOIN` tetap dipakai untuk jaga-jaga |
+| `OrgPayTypeID` ≠ `PayTypeID` | 0 | Tidak perlu dikirim |
+| `TransactionID` bentrok di tanggal yang sama | 0 | Sama seperti Promise |
+| View yang ada di POS | `vw_ordertransaction`, `vw_orderdetail`, `export_payment_pos`, `export_sales_final` | `vw_orderpaydetail` belum ada |
+
+Catatan dari daftar jenis bayar Vtec (20 jenis dalam 30 hari, terbanyak
+QRIS BCA 4.726 baris, Cash 614, Debit BCA 512, CC BCA 126):
+
+- **`IsSale = 0` di hampir semua jenis bayar**, kecuali Cash. Seperti
+  `IsOtherReceipt` di Promise, flag ini **tidak** bisa dipakai untuk
+  membuang pembayaran. Arti flag juga berbeda antar sistem, karena keduanya
+  memang software yang berbeda.
+- **10008 (Debit BNI), 10051 (Debit BRI), dan 10152 (QRIS BNI) masih aktif
+  dan terpakai**: 18 + 33 + 16 baris, total ±14,3 juta dalam 30 hari.
+  Nominalnya **termasuk** dalam `ReceiptPayPrice` (Σ tetap cocok). Jadi
+  kalau sync-api mengikuti query lama dan membuangnya, Σ `payments` tidak
+  akan sama dengan `grandTotal` (pertanyaan #3).
+- **`PayTypeCode` juga tidak seragam** (`CS`, `DBCA`, `JKT0038`, `SBY013`),
+  jadi tidak cocok dijadikan kunci pemetaan.
+
+Uji alur agen untuk 16 November 2026 (199 transaksi, 1.026 item) juga
+berjalan. Karena view belum dibuat, `payments` tidak dikirim, sesuai
+harapan.
+
+Langkah 0 untuk **Vtec selesai**.
 
 ---
 
@@ -340,9 +382,11 @@ pembayaran di kedua sistem tidak punya kolom `Deleted`.
 - **Jangan** buang `PayTypeID` 10008/10051/10152 di view, walaupun query lama
   Vtec membuangnya (pertanyaan #3). Agen mengirim semua pembayaran beserta
   `IsSale`/`IsOtherReceipt`, dan keputusan filter diambil di sync-api atau ERP.
-- **Tidak ada** filter `Paid` di Promise: nilainya selalu 0 (lihat 3.5).
-- **Jangan** filter berdasarkan `IsOtherReceipt`. Flag ini terpasang juga di
-  pembayaran penjualan biasa (lihat 3.5).
+- **Tidak ada** filter `Paid`, baik di Promise maupun Vtec: nilainya selalu
+  0 (3.5, 3.6).
+- **Jangan** filter berdasarkan `IsOtherReceipt` atau `IsSale`. Di Promise,
+  `IsOtherReceipt = 1` terpasang di pembayaran penjualan biasa. Di Vtec,
+  `IsSale = 0` di hampir semua jenis bayar selain Cash (3.5, 3.6).
 
 ---
 
@@ -351,10 +395,10 @@ pembayaran di kedua sistem tidak punya kolom `Deleted`.
 > **Status (17 November 2026): 5.1–5.4 dan dokumentasi agen di 5.5 sudah
 > dikerjakan** (`core/database.py`, `controllers/dashboard_controller.py`,
 > `core/api_client.py`). Sudah diuji offline dengan data tiruan, dan diuji
-> read-only ke MySQL Promise (server B, 16 November 2026: 65 transaksi,
-> 539 item). Karena view belum dibuat, `payments` tidak dikirim, sesuai
-> harapan. Alur dengan view terpasang dan uji di Vtec belum dilakukan.
-> Build exe dan rilis ke outlet juga belum.
+> read-only ke MySQL Promise (16 November 2026: 65 transaksi, 539 item)
+> dan Vtec (16 November 2026: 199 transaksi, 1.026 item). Karena view belum
+> dibuat, `payments` tidak dikirim, sesuai harapan. Alur dengan view
+> terpasang belum diuji. Build exe dan rilis ke outlet juga belum.
 
 Semua perubahan mengikuti aturan `AGENTS.md` agen: query parameterized,
 hasilnya list of dict, dan agen tetap hanya membaca MySQL.
@@ -503,9 +547,9 @@ perlu diputuskan:
 
 | # | Pertanyaan | Ditanyakan ke |
 |---|---|---|
-| 1 | **Promise selesai** (3.5): `Amount` bersih dan Σ = `ReceiptPayPrice` selama 30 hari, `Paid` tidak dipakai, voucher adalah diskon, dan tidak ada bentrok `TransactionID` di tanggal yang sama. Yang tersisa: **Vtec**, yaitu apakah Σ `PayAmount` = `ReceiptPayPrice` dan arti `Paid`/`CashChange` | Cek langsung di POS Vtec (langkah 0) |
+| 1 | ~~Struktur dan arti kolom pembayaran~~ **Terjawab.** Promise (3.5) dan Vtec (3.6): nominal bersih, Σ = `ReceiptPayPrice` di 30 dari 30 hari, `Paid` tidak dipakai, `CashChange` Vtec adalah kembalian. | – |
 | 2 | Di dalam **satu sistem POS**, apakah `PayTypeID` dan namanya sama di semua outlet? Promise dan Vtec **tidak** dibandingkan, karena jenis bayarnya memang dipisah (aturan di bagian 1). ERP Gateway perlu tahu bahwa pemetaan akunnya per (sistem POS, jenis bayar). | Cek langsung di POS, lalu ERP Gateway |
-| 3 | Kenapa query lama Vtec membuang `PayTypeID` 10008/10051/10152 (debit BNI, debit BRI, QRIS BNI)? Apakah aturan ini juga berlaku untuk rekap ERP? Untuk Promise, aturannya (kalau ada) ditetapkan sendiri dengan ID Promise. Aturan Vtec tidak disalin ke Promise berdasarkan kemiripan nama (mis. QRIS BNI Vtec = 10152, Promise = 864). | Tim keuangan / pemilik query lama |
+| 3 | Kenapa query lama Vtec membuang `PayTypeID` 10008/10051/10152 (debit BNI, debit BRI, QRIS BNI)? Ketiganya masih aktif (±14,3 juta dalam 30 hari di satu outlet) dan termasuk dalam `ReceiptPayPrice` (3.6). Apakah aturan ini juga berlaku untuk rekap ERP? Kalau berlaku, aturan blokir Σ `payments` = `grandTotal` perlu disesuaikan. Untuk Promise, aturannya (kalau ada) ditetapkan sendiri dengan ID Promise. Aturan Vtec tidak disalin ke Promise berdasarkan kemiripan nama (mis. QRIS BNI Vtec = 10152, Promise = 864). | Tim keuangan / pemilik query lama |
 | 4 | Apakah transaksi `Deleted = 1` perlu dikirim ke sync-api? | Tim keuangan |
 | 5 | Apa beda `paymentAmount` dan `fullPaymentAmount`? (mis. sebelum/sesudah MDR, atau termasuk kembalian) | ERP Gateway |
 | 6 | Apakah COA diisi sepenuhnya oleh ERP Gateway? | ERP Gateway |
