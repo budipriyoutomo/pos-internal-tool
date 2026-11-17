@@ -114,3 +114,36 @@ class TransactionData:
 
         with DatabaseConnection() as db:
             return db.execute_query(query, tuple(transaction_ids) + (date_str,))
+
+    # Error MySQL yang berarti view vw_orderpaydetail belum siap di outlet ini:
+    # 1146 = tabel/view tidak ada, 1356 = view ada tapi merujuk kolom/tabel
+    # yang tidak ada.
+    VIEW_BELUM_SIAP = (1146, 1356)
+
+    @staticmethod
+    def get_sales_payment(transaction_ids, date_str):
+        """
+        Baris pembayaran dari vw_orderpaydetail.
+
+        Mengembalikan None (bukan []) kalau view belum dibuat di outlet ini,
+        supaya pemanggil bisa membedakan "tidak diketahui" dari "tidak ada
+        pembayaran". Lihat docs/perubahan-agen-pos-payments.md bagian 5.2.
+        """
+        if not transaction_ids:
+            return []
+
+        placeholders = ",".join(["%s"] * len(transaction_ids))
+
+        query = f"""
+            SELECT *
+            FROM vw_orderpaydetail
+            WHERE TransactionID IN ({placeholders}) AND CAST(SaleDate AS DATE) = %s
+        """
+
+        try:
+            with DatabaseConnection() as db:
+                return db.execute_query(query, tuple(transaction_ids) + (date_str,))
+        except pymysql.err.MySQLError as e:
+            if e.args and e.args[0] in TransactionData.VIEW_BELUM_SIAP:
+                return None
+            raise

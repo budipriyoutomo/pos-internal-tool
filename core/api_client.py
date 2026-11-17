@@ -144,10 +144,21 @@ class APIClient:
         no_items = sum(1 for s in sales if not s.get("items"))
         receipt_ids = [s.get("receipt_id") or 0 for s in sales]
 
+        # Key "payments" tidak ada = view vw_orderpaydetail belum dibuat.
+        if any("payments" in s for s in sales):
+            payment_rows = sum(len(s.get("payments") or []) for s in sales)
+            no_payments = sum(1 for s in sales if not s.get("payments"))
+            ringkas_bayar = (
+                f"baris payments: {payment_rows} | tanpa payments: {no_payments}"
+            )
+        else:
+            ringkas_bayar = "payments: tidak dikirim"
+
         return (
             f"{len(sales)} transaksi | sale_date={sale_dates} | "
             f"receipt_id {min(receipt_ids)}..{max(receipt_ids)} | "
-            f"trx_date kosong: {null_trx_date} | tanpa items: {no_items}"
+            f"trx_date kosong: {null_trx_date} | tanpa items: {no_items} | "
+            f"{ringkas_bayar}"
         )
 
     # ==============================

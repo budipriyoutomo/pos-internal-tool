@@ -121,6 +121,18 @@ DETAIL_FIELDS = (
     "Comment", "OrderStaffID", "OrderTableID", "VoidStaffID",
 )
 
+# Kontrak kolom vw_orderpaydetail (sama di Promise dan Vtec, lihat
+# queryPOS/*/vw_orderpaydetail.sql). Isi PayTypeID/PayTypeName tetap milik
+# sistem POS masing-masing — jangan pernah dipetakan antar sistem.
+PAYMENT_FIELDS = (
+    "PayDetailID", "TransactionID", "ComputerID", "SaleDate",
+    "PayTypeID", "PayTypeCode", "PayTypeName", "PayTypeDisplayName",
+    "PayAmount", "CashChange", "IsFromEDC", "IsSale", "IsOtherReceipt",
+)
+
+# Toleransi selisih Σ pembayaran vs ReceiptPayPrice (rupiah).
+PAYMENT_TOLERANCE = 0.5
+
 
 class DashboardController:
     def __init__(self, view):
@@ -343,12 +355,32 @@ class DashboardController:
 
             print(f"📦 Detail ditemukan: {len(details)}")
 
-            self.dump_source_sample(date_str, headers, details)
-
             if details and isinstance(details[0], tuple):
                 raise Exception(
                     "Database return tuple, harus dict (fix execute_query)"
                 )
+
+            # =========================
+            # PAYMENT
+            # =========================
+            # None = view vw_orderpaydetail belum dibuat di outlet ini. Closing
+            # tetap jalan, payload dikirim TANPA key "payments" supaya server
+            # mencatatnya sebagai "tidak diketahui", bukan "tidak ada bayar".
+            payments = TransactionData.get_sales_payment(
+                trx_ids,
+                date_str
+            )
+
+            if payments is None:
+                self.log_warning(
+                    "View vw_orderpaydetail belum ada di POS ini — data "
+                    "pembayaran tidak ikut dikirim. Buat view dari "
+                    "queryPOS/<sistem>/vw_orderpaydetail.sql."
+                )
+            else:
+                print(f"💳 Pembayaran ditemukan: {len(payments)}")
+
+            self.dump_source_sample(date_str, headers, details, payments)
 
             # =========================
             # DEBUG DETAIL
@@ -369,7 +401,7 @@ class DashboardController:
             # =========================
             # BUILD PAYLOAD
             # =========================
-            payload = self.build_payload(headers, details)
+            payload = self.build_payload(headers, details, payments)
 
             if not payload.get("sales"):
                 self.log_warning("Payload kosong setelah build")
@@ -469,7 +501,7 @@ class DashboardController:
         for s in suggestions:
             self.log_warning(s)
 
-    def dump_source_sample(self, date_str, headers, details):
+    def dump_source_sample(self, date_str, headers, details, payments=None):
         """
         Simpan struktur baris mentah dari view ke logs/.
 
@@ -504,6 +536,10 @@ class DashboardController:
                 "tanggal": date_str,
                 "header": profil(headers),
                 "detail": profil(details),
+                "payment": (
+                    {"status": "view vw_orderpaydetail belum ada"}
+                    if payments is None else profil(payments)
+                ),
             }
 
             with open(path, "w", encoding="utf-8") as f:
@@ -538,6 +574,57 @@ class DashboardController:
                 "cek kolom ReceiptTotalAmount di vw_ordertransaction."
             )
 
+        self.warn_payment_mismatch(sales)
+
+    def warn_payment_mismatch(self, sales):
+        """
+        Peringatkan transaksi lunas tanpa pembayaran, dan transaksi yang
+        Σ amount pembayarannya ≠ receipt_pay_price. Hanya berlaku kalau
+        payload membawa key "payments" (view vw_orderpaydetail sudah ada).
+        """
+        dengan_payments = [s for s in sales if "payments" in s]
+
+        if not dengan_payments:
+            return
+
+        lunas = [
+            s for s in dengan_payments
+            if s.get("transaction_status_id") == 2
+            and s.get("receipt_id")
+            and not s.get("deleted")
+        ]
+
+        tanpa_bayar = [s for s in lunas if not s["payments"]]
+
+        selisih = []
+        for s in dengan_payments:
+            if not s["payments"]:
+                continue
+
+            total = sum(p["amount"] for p in s["payments"])
+            tagihan = s.get("receipt_pay_price") or 0.0
+
+            if abs(total - tagihan) > PAYMENT_TOLERANCE:
+                selisih.append(
+                    f"trx={s.get('transaction_id')} "
+                    f"bayar={total:,.0f} tagihan={tagihan:,.0f}"
+                )
+
+        if tanpa_bayar:
+            contoh = ", ".join(
+                str(s.get("transaction_id")) for s in tanpa_bayar[:5]
+            )
+            self.log_warning(
+                f"{len(tanpa_bayar)} transaksi lunas tidak punya pembayaran "
+                f"(mis. trx {contoh})."
+            )
+
+        if selisih:
+            self.log_warning(
+                f"{len(selisih)} transaksi Σ pembayaran ≠ ReceiptPayPrice: "
+                + "; ".join(selisih[:5])
+            )
+
     def warn_missing_columns(self, rows, expected, label):
         """Peringatkan kalau view tidak punya kolom yang dibaca payload."""
         if not rows:
@@ -551,15 +638,61 @@ class DashboardController:
                 f"default: {', '.join(missing)}"
             )
 
-    def build_payload(self, headers, details):
+    def build_payload(self, headers, details, payments=None):
+        """
+        payments=None berarti data pembayaran tidak diketahui (view belum
+        ada): key "payments" tidak dikirim sama sekali. payments=[] berarti
+        memang tidak ada pembayaran: setiap transaksi dikirim "payments": [].
+        """
 
         detail_map = {}
+        payment_map = {}
         null_id_rows = []
         grup_disamakan = {}
         self.log_info("🔹 Membangun payload untuk API...")
 
         self.warn_missing_columns(headers, HEADER_FIELDS, "header")
         self.warn_missing_columns(details, DETAIL_FIELDS, "detail")
+
+        if payments is not None:
+            self.warn_missing_columns(payments, PAYMENT_FIELDS, "payment")
+
+        # 🔹 mapping pembayaran per transaksi (kunci sama dengan detail_map)
+        for p in payments or []:
+            trx_id = _to_int(p.get("TransactionID"))
+
+            if not trx_id or p.get("PayDetailID") is None:
+                null_id_rows.append(
+                    f"payment trx={p.get('TransactionID')} "
+                    f"pay_detail_id={p.get('PayDetailID')}"
+                )
+
+            # Nomor kartu dsb. sengaja tidak ada di view dan tidak dikirim.
+            payment_map.setdefault(trx_id, []).append({
+                "pay_detail_id": _to_int(p.get("PayDetailID")),
+                "computer_id": _to_int(p.get("ComputerID")),
+                "pay_type_id": _to_int(p.get("PayTypeID")),
+                "pay_type_code": _text(p.get("PayTypeCode")),
+                "pay_type_name": _text(p.get("PayTypeName")),
+                "pay_type_display_name": _text(p.get("PayTypeDisplayName")),
+                "amount": _to_float(p.get("PayAmount")),
+                "cash_change": _to_float(p.get("CashChange")),
+                "is_from_edc": _to_int(p.get("IsFromEDC")),
+                "is_sale": _to_int(p.get("IsSale")),
+                "is_other_receipt": _to_int(p.get("IsOtherReceipt")),
+            })
+
+        tanpa_nama = sorted({
+            b["pay_type_id"]
+            for rows in payment_map.values() for b in rows
+            if not b["pay_type_name"]
+        })
+
+        if tanpa_nama:
+            self.log_warning(
+                "Jenis bayar tanpa nama di master paytype (PayTypeID): "
+                + ", ".join(str(i) for i in tanpa_nama)
+            )
 
         # 🔹 mapping detail ke item (SUDAH SESUAI FORMAT BARU)
         for d in details:
@@ -622,7 +755,7 @@ class DashboardController:
 
             paid_time = _to_iso(h.get("PaidTime"))
 
-            result.append({
+            sale = {
                 "transaction_id": trx_id,  # ✅ rename
                 "invoice_number": h.get("ReferenceNo"),  # ✅ rename
 
@@ -681,7 +814,12 @@ class DashboardController:
 
                 # 🔥 RELATION
                 "items": detail_map.get(trx_id, [])
-            })
+            }
+
+            if payments is not None:
+                sale["payments"] = payment_map.get(trx_id, [])
+
+            result.append(sale)
 
         if grup_disamakan:
             rincian = ", ".join(

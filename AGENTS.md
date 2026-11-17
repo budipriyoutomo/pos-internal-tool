@@ -13,7 +13,8 @@ harian outlet restoran Maharasa. Tiga fungsi utama:
 1. **Generate report** — baca ringkasan penjualan dari MySQL POS (`bsum_trans`,
    `bsum_menu`), tulis file `.txt` fixed-width, kirim via email (SMTP SSL).
 2. **Sync sales ke API** — ambil transaksi detail (`vw_ordertransaction`,
-   `vw_orderdetail`), susun payload JSON, masukkan ke antrian SQLite lokal.
+   `vw_orderdetail`, `vw_orderpaydetail`), susun payload JSON, masukkan ke
+   antrian SQLite lokal.
 3. **Closing Colorplate** — trigger publish di server (RabbitMQ exchange) lalu
    polling sampai server menjawab "published".
 
@@ -77,8 +78,12 @@ lain)* `worker.py` → `APIClient.process_queue()` → `POST /sync/sales`.
 ### Database
 - Query MySQL **wajib parameterized** (`%s`), jangan f-string. Satu-satunya
   interpolasi yang diizinkan adalah placeholder `IN (...)` di
-  `TransactionData.get_sales_detail()`; jumlahnya dihitung dari `len()`, nilainya
-  tetap lewat params.
+  `TransactionData.get_sales_detail()` dan `get_sales_payment()`; jumlahnya
+  dihitung dari `len()`, nilainya tetap lewat params.
+- Agen dipakai di **dua software POS** (Promise dan Vtec) dengan skema tabel
+  berbeda. Agen hanya membaca view `vw_*`, yang menyamakan nama kolom.
+  Definisinya ada di `../queryPOS/{promise,vtec}/`. Jenis bayar dari kedua
+  sistem **tidak pernah digabung**, walaupun namanya sama.
 - `execute_query()` mengembalikan **list of dict** (`DictCursor`). Controller
   bergantung penuh pada ini — jangan ganti ke tuple cursor.
 - Driver aktif = **PyMySQL**. Jangan tambahkan `mysql.connector` lagi.

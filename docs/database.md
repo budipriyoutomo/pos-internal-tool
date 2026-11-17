@@ -27,7 +27,7 @@ supaya koneksi yang idle tidak putus.
 
 ### Objek yang dibaca
 
-Aplikasi **hanya melakukan SELECT** ke 4 objek berikut:
+Aplikasi **hanya melakukan SELECT** ke 5 objek berikut:
 
 | Objek | Jenis | Dipakai untuk |
 |---|---|---|
@@ -35,6 +35,11 @@ Aplikasi **hanya melakukan SELECT** ke 4 objek berikut:
 | `bsum_menu` | tabel ringkasan | Report: rincian per grup menu, dipisah `salemode` |
 | `vw_ordertransaction` | view | Sync API: header transaksi |
 | `vw_orderdetail` | view | Sync API: item per transaksi |
+| `vw_orderpaydetail` | view | Sync API: pembayaran per transaksi. **Opsional**: kalau belum dibuat di outlet, sync tetap jalan tanpa `payments`. |
+
+View `vw_*` dibuat per sistem POS (Promise / Vtec) dengan nama kolom keluaran
+yang sama. Definisinya disimpan di `POSClosing/v3/queryPOS/{promise,vtec}/`.
+Latar belakang `vw_orderpaydetail`: [perubahan-agen-pos-payments.md](perubahan-agen-pos-payments.md).
 
 ### Query
 
@@ -57,6 +62,12 @@ WHERE ReceiptID > %s AND saledate = %s;
 -- get_sales_detail(transaction_ids, date_str)
 SELECT * FROM vw_orderdetail
 WHERE TransactionID IN (%s, %s, ...)     -- jumlah placeholder = len(ids)
+  AND CAST(SaleDate AS DATE) = %s;
+
+-- get_sales_payment(transaction_ids, date_str)
+-- Mengembalikan None kalau view belum ada (MySQL error 1146/1356).
+SELECT * FROM vw_orderpaydetail
+WHERE TransactionID IN (%s, %s, ...)
   AND CAST(SaleDate AS DATE) = %s;
 ```
 
@@ -89,6 +100,12 @@ struktur tabel berubah, ini yang harus tetap ada.
 `ProductGroupName`, `ProductDeptName`, `ProductSetType`, `OrderStatusID`,
 `SaleMode`, `Amount` (=qty), `Price`, `RetailPrice`, `MinimumPrice`, `Comment`,
 `OrderStaffID`, `OrderTableID`, `VoidStaffID`
+
+**`vw_orderpaydetail`** (pembayaran, `PAYMENT_FIELDS`):
+`PayDetailID`, `TransactionID`, `ComputerID`, `SaleDate`, `PayTypeID`,
+`PayTypeCode`, `PayTypeName`, `PayTypeDisplayName`, `PayAmount` (nominal
+bersih), `CashChange`, `IsFromEDC`, `IsSale`, `IsOtherReceipt`. Nomor kartu
+sengaja tidak ada di view.
 
 Hanya `TransactionID`, `OrderDetailID`, `ProductID`, `Amount`, `Price` yang
 diakses tanpa default — sisanya pakai `.get(..., default)` sehingga aman kalau
