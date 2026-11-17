@@ -238,22 +238,27 @@ Yang ditetapkan dari langkah 0:
 6. **Arti `Paid` di Promise** dan **`OrgPayTypeID` di Vtec.** Kalau `Paid = 0`
    artinya belum dibayar, view Promise harus memfilternya.
 
-### 3.5 Hasil sementara: Promise (17 November 2026)
+### 3.5 Hasil: Promise (17 November 2026)
 
-Dijalankan dari agen ke satu server Promise (`promise6`, tiga `ComputerID`:
-1583, 1585, 1586). Koneksi ke server terputus di tengah pengujian, jadi uji
-rentang 30 hari **belum** jalan.
+Dijalankan dari agen, hanya membaca, ke dua server Promise (`promise6`):
+
+- **Server A**: `ComputerID` 1583, 1585, 1586. Koneksinya putus-sambung, jadi
+  hanya uji awal yang jalan.
+- **Server B**: `ComputerID` 790, 793, 838. Uji lengkap 30 hari
+  (19 Oktober–17 November 2026, 3.342 transaksi).
 
 | Cek | Hasil | Arti |
 |---|---|---|
 | Draf view (SELECT-nya) | Jalan, kolom keluaran sesuai 4.1 | Join `paydetail.PayTypeID = paytype.TypeID` benar |
-| Σ `Amount` vs `ReceiptPayPrice` | 0 selisih, 3 transaksi (717.328 = 717.328) | `Amount` tampaknya nominal bersih. **Sampel terlalu kecil**, ulangi untuk satu hari penuh. |
-| Transaksi tanpa pembayaran | 0 | – |
-| Jenis bayar tanpa master | 0 (seluruh tabel) | `LEFT JOIN` tetap dipakai untuk jaga-jaga |
-| `paydetail.Paid` | Selalu 0 (98.322 baris) | Bukan penanda lunas. **Tidak perlu filter `Paid`.** |
-| `TransactionID` di >1 `ComputerID` | **Ada** (mis. 5892–5901 muncul di 2 komputer) | `TransactionID` tidak unik tanpa `ComputerID`. Lihat bagian 8 #5. Yang belum dicek: apakah bentrok terjadi di **tanggal yang sama**. |
-| Jenis bayar 30 hari | 24 jenis, mis. QRIS BCA, Credit Card, BCA DEBIT, Cash, GOBIZ, GRABFOOD | Lihat catatan di bawah |
-| `paybyvoucher` | Kolom: `TransactionID`, `ComputerID`, `TypeID`, `OriginalAmount`, `UsedAmount`, `IsSale`, dll. | Belum dicek apakah nominalnya juga ada di `paydetail` |
+| Σ `Amount` vs `ReceiptPayPrice` (B, 30 hari) | **Cocok di 30 dari 30 hari**, 0 transaksi selisih | `Amount` adalah **nominal bersih**, tanpa kembalian. View Promise sudah memakai kolom yang benar. |
+| Transaksi tanpa pembayaran (B, 30 hari) | 0 | – |
+| Transaksi multi-pembayaran (B, 30 hari) | 3.118 trx 1 baris, 24 trx 2 baris, 1 trx 4 baris | `payments` memang bisa berisi lebih dari satu baris per transaksi |
+| Pembayaran nominal ≤ 0 (B, 30 hari) | 4 baris "Voucher Adjustment" (`TypeID` 168), total −4 | Lihat catatan `Vadj` di bawah |
+| Jenis bayar tanpa master (A) | 0 (seluruh tabel) | `LEFT JOIN` tetap dipakai untuk jaga-jaga |
+| `paydetail.Paid` (A) | Selalu 0 (98.322 baris) | Bukan penanda lunas. **Tidak perlu filter `Paid`.** |
+| `TransactionID` di >1 `ComputerID` | Ada. B: 11.930 `TransactionID` (108366–120335) dipakai lebih dari satu komputer. **Tidak ada** yang bentrok di tanggal yang sama (B, 30 hari). | Agen aman, karena selalu memfilter per tanggal. Risikonya ada di kunci penyimpanan sync-api (bagian 8 #5). |
+| Voucher `paybyvoucher` (B, 30 hari) | 21 transaksi, `UsedAmount` total 3.175.000, semuanya `IsSale = 0`. Σ `paydetail` tetap = `ReceiptPayPrice`, dan nominal voucher **tidak** ada di `paydetail`. | Voucher ini potongan (diskon), bukan pembayaran, dan sudah mengurangi `ReceiptPayPrice`. **View tidak perlu menggabungkan `paybyvoucher`.** |
+| Jenis bayar 30 hari (A) | 24 jenis, mis. QRIS BCA, Credit Card, BCA DEBIT, Cash, GOBIZ, GRABFOOD | Lihat catatan di bawah |
 
 Catatan dari daftar jenis bayar Promise:
 
@@ -265,18 +270,18 @@ Catatan dari daftar jenis bayar Promise:
 - **`IsOtherReceipt = 1`** terpasang di BCA DEBIT, Niaga Master, dan Visa
   BNI, yang jelas pembayaran penjualan. Jangan memakai flag ini untuk
   membuang pembayaran. Flag ini tetap dikirim sebagai informasi saja.
-- **"Voucher Adjustment" (`Vadj`) bernilai −1.** Penyesuaian kecil atau
-  pembulatan tercatat sebagai baris pembayaran negatif. Ini relevan untuk
-  pertanyaan #8.
+- **"Voucher Adjustment" (`Vadj`, `TypeID` 168) bernilai −1** per baris.
+  Penyesuaian kecil atau pembulatan tercatat sebagai baris pembayaran
+  negatif, dan ikut dalam Σ = `ReceiptPayPrice`. Jangan dibuang di view.
+  sync-api dan ERP perlu tahu cara memperlakukannya (pertanyaan #8).
 - **`PayTypeCode` tidak seragam** (`cc`, `1`, `JKT0066`, `STBDG082`,
   `STBALI0017`). Prefiks lokasinya menandakan kode dibuat per outlet, jadi
   kode ini **tidak** cocok dijadikan kunci pemetaan di ERP. Nama
   (`PayTypeName`) lebih stabil, tetapi tetap perlu dibandingkan antar outlet
   **Promise** (pertanyaan #2).
 
-Yang belum: uji satu hari penuh dan 30 hari (Σ, transaksi multi-pembayaran,
-voucher), bentrok `TransactionID` di tanggal yang sama, serta seluruh
-pengecekan Vtec.
+Langkah 0 untuk **Promise selesai**. Yang belum: seluruh pengecekan **Vtec**
+(3.1–3.4), terutama arti `PayAmount`, `Paid` dan `CashChange`.
 
 ---
 
@@ -345,9 +350,11 @@ pembayaran di kedua sistem tidak punya kolom `Deleted`.
 
 > **Status (17 November 2026): 5.1–5.4 dan dokumentasi agen di 5.5 sudah
 > dikerjakan** (`core/database.py`, `controllers/dashboard_controller.py`,
-> `core/api_client.py`). Sudah diuji offline dengan data tiruan, tetapi
-> **belum** diuji ke MySQL POS. Build exe dan rilis ke outlet belum
-> dilakukan.
+> `core/api_client.py`). Sudah diuji offline dengan data tiruan, dan diuji
+> read-only ke MySQL Promise (server B, 16 November 2026: 65 transaksi,
+> 539 item). Karena view belum dibuat, `payments` tidak dikirim, sesuai
+> harapan. Alur dengan view terpasang dan uji di Vtec belum dilakukan.
+> Build exe dan rilis ke outlet juga belum.
 
 Semua perubahan mengikuti aturan `AGENTS.md` agen: query parameterized,
 hasilnya list of dict, dan agen tetap hanya membaca MySQL.
@@ -487,7 +494,7 @@ perlu diputuskan:
 | 2 | Vtec | `vw_ordertransaction`: `PaidTime AS CloseTime` | `close_time` sama dengan waktu bayar. |
 | 3 | Vtec | `vw_orderdetail` tidak punya `MinimumPrice` | Agen memberi peringatan kolom hilang dan mengirim 0. |
 | 4 | Keduanya | `vw_ordertransaction` tidak memfilter `Deleted` | Transaksi yang dihapus tetap terkirim, tanpa item, dan nanti tanpa pembayaran. |
-| 5 | Keduanya (terbukti di Promise) | `vw_ordertransaction` tidak menampilkan `ComputerID`, padahal `TransactionID` **tidak unik** antar `ComputerID` (3.5) | `get_sales_detail()` memfilter `TransactionID IN (...)` dan `build_payload()` mengelompokkan per `TransactionID`. Kalau dua komputer memakai `TransactionID` yang sama di tanggal yang sama, item (dan nanti pembayaran) dari dua transaksi berbeda akan tercampur. Perbaikannya: tambahkan `ComputerID` ke `vw_ordertransaction` dan kelompokkan per (`TransactionID`, `ComputerID`). Prioritasnya bergantung pada hasil cek bentrok di tanggal yang sama. |
+| 5 | Keduanya (terbukti di Promise) | `vw_ordertransaction` tidak menampilkan `ComputerID`, padahal `TransactionID` **tidak unik** antar `ComputerID`. Di server B ada 11.930 `TransactionID` yang dipakai lebih dari satu komputer (3.5). | **Agen:** aman untuk sekarang. Dalam 30 hari tidak ada bentrok di tanggal yang sama, dan agen selalu memfilter per tanggal. **sync-api:** berisiko. Kalau header/item disimpan dengan kunci (outlet, `TransactionID`) saja, transaksi komputer lain dengan `TransactionID` yang sama di tanggal lain bisa **menimpa** data lama saat upsert. Perlu dicek di sync-api. Perbaikan jangka panjang: tambahkan `ComputerID` ke `vw_ordertransaction` dan ke kunci penyimpanan. |
 | 6 | Vtec | Query lama `bsum_tran` (`vtecQuery2.sql`) menjumlah `ReceiptPayPrice` setelah join ke `orderpaydetail` | Transaksi dengan dua metode bayar terhitung dua kali. Jangan jadikan acuan angka. |
 
 ---
@@ -496,7 +503,7 @@ perlu diputuskan:
 
 | # | Pertanyaan | Ditanyakan ke |
 |---|---|---|
-| 1 | Struktur kolom **sudah diketahui** (bagian 2), dan `Paid` di Promise terjawab (3.5). Yang tersisa: Σ `Amount` (Promise) dan `PayAmount` (Vtec) = `ReceiptPayPrice` untuk satu hari penuh, arti `Paid`/`CashChange` di Vtec, voucher Promise di `paybyvoucher`, dan bentrok `TransactionID` di tanggal yang sama | Cek langsung di POS (langkah 0) |
+| 1 | **Promise selesai** (3.5): `Amount` bersih dan Σ = `ReceiptPayPrice` selama 30 hari, `Paid` tidak dipakai, voucher adalah diskon, dan tidak ada bentrok `TransactionID` di tanggal yang sama. Yang tersisa: **Vtec**, yaitu apakah Σ `PayAmount` = `ReceiptPayPrice` dan arti `Paid`/`CashChange` | Cek langsung di POS Vtec (langkah 0) |
 | 2 | Di dalam **satu sistem POS**, apakah `PayTypeID` dan namanya sama di semua outlet? Promise dan Vtec **tidak** dibandingkan, karena jenis bayarnya memang dipisah (aturan di bagian 1). ERP Gateway perlu tahu bahwa pemetaan akunnya per (sistem POS, jenis bayar). | Cek langsung di POS, lalu ERP Gateway |
 | 3 | Kenapa query lama Vtec membuang `PayTypeID` 10008/10051/10152 (debit BNI, debit BRI, QRIS BNI)? Apakah aturan ini juga berlaku untuk rekap ERP? Untuk Promise, aturannya (kalau ada) ditetapkan sendiri dengan ID Promise. Aturan Vtec tidak disalin ke Promise berdasarkan kemiripan nama (mis. QRIS BNI Vtec = 10152, Promise = 864). | Tim keuangan / pemilik query lama |
 | 4 | Apakah transaksi `Deleted = 1` perlu dikirim ke sync-api? | Tim keuangan |
