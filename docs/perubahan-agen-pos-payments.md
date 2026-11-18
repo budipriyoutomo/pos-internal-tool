@@ -404,8 +404,15 @@ pembayaran di kedua sistem tidak punya kolom `Deleted`.
 > `ReceiptPayPrice` di 7 dari 7 hari (11–17 November). Uji alur agen tanggal
 > 17 November: 110 transaksi, 716 item, 110 baris `payments`, 0 transaksi
 > tanpa pembayaran, tanpa peringatan selisih, query payment 0,1 detik.
-> View Promise belum dipasang/diuji dengan alur agen. Build exe dan rilis
-> ke outlet juga belum.
+>
+> **18 November 2026: view Promise terpasang di `promise6`** (MySQL 5.5.62,
+> definer `POSAdmin@%`, 13 kolom sesuai `PAYMENT_FIELDS`). Σ `PayAmount`
+> view = `ReceiptPayPrice` di 7 dari 7 hari (11–17 November). Uji alur agen
+> tanggal 17 November: 77 transaksi, 566 item, 78 baris `payments` (ada
+> transaksi split REEDEM POINT + Cash), 0 transaksi tanpa pembayaran, tanpa
+> peringatan selisih, query payment 0,1 detik.
+>
+> Kedua sistem sudah lolos. Build exe dan rilis ke outlet belum.
 
 Semua perubahan mengikuti aturan `AGENTS.md` agen: query parameterized,
 hasilnya list of dict, dan agen tetap hanya membaca MySQL.
