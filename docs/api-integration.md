@@ -160,11 +160,46 @@ worker meng-unwrap dan hanya mengirim isi `payload`.
           "order_table_id": 12,
           "void_staff_id": 0
         }
+      ],
+
+      "payments": [
+        {
+          "pay_detail_id": 1,
+          "computer_id": 1585,
+          "pay_type_id": 723,
+          "pay_type_code": "JKT0066",
+          "pay_type_name": "QRIS BCA",
+          "pay_type_display_name": "QRIS BCA",
+          "amount": 168000.0,
+          "cash_change": 0.0,
+          "is_from_edc": 0,
+          "is_sale": 1,
+          "is_other_receipt": 0
+        }
       ]
     }
   ]
 }
 ```
+
+### Field `payments`
+
+Diisi dari view `vw_orderpaydetail`, satu elemen per baris pembayaran.
+
+| Kondisi | Isi payload |
+|---|---|
+| View `vw_orderpaydetail` belum ada di outlet | Key `payments` **tidak dikirim** = data pembayaran tidak diketahui |
+| View ada, transaksi tanpa pembayaran | `"payments": []` |
+| View ada, ada pembayaran | `"payments": [ ... ]` |
+
+- `pay_type_id`/`pay_type_name` adalah milik sistem POS outlet (Promise atau
+  Vtec). Sistem POS diketahui server dari `API_KEY`. Jenis bayar dari dua
+  sistem tidak boleh digabung walaupun namanya sama.
+- Kunci baris di server: (outlet, `transaction_id`, `computer_id`,
+  `pay_detail_id`).
+- Nomor kartu, nama pemegang kartu, dan kode approval tidak dikirim.
+- Agen memberi peringatan (tidak memblokir) untuk transaksi lunas tanpa
+  pembayaran dan Σ `amount` ≠ `receipt_pay_price`.
 
 ### Pemetaan kolom DB → field JSON
 

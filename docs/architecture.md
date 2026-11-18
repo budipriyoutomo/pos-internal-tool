@@ -88,7 +88,8 @@ DashboardView.on_close_colorplate()
             │    ├─ last_id = get_last_sync() or 0
             │    ├─ get_sales_header(last_id, date)  → vw_ordertransaction
             │    ├─ get_sales_detail(trx_ids, date)  → vw_orderdetail
-            │    ├─ build_payload(headers, details)  → {"sales":[{...,"items":[...]}]}
+            │    ├─ get_sales_payment(trx_ids, date) → vw_orderpaydetail (None kalau view belum ada)
+            │    ├─ build_payload(headers, details, payments) → {"sales":[{...,"items":[...],"payments":[...]}]}
             │    ├─ APIClient.enqueue_sales()        → INSERT queue.db
             │    └─ update_last_sync(max ReceiptID)
             └─ loop 30×, jeda 2 detik:
