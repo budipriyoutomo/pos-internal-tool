@@ -397,8 +397,15 @@ pembayaran di kedua sistem tidak punya kolom `Deleted`.
 > `core/api_client.py`). Sudah diuji offline dengan data tiruan, dan diuji
 > read-only ke MySQL Promise (16 November 2026: 65 transaksi, 539 item)
 > dan Vtec (16 November 2026: 199 transaksi, 1.026 item). Karena view belum
-> dibuat, `payments` tidak dikirim, sesuai harapan. Alur dengan view
-> terpasang belum diuji. Build exe dan rilis ke outlet juga belum.
+> dibuat, `payments` tidak dikirim, sesuai harapan.
+>
+> **18 November 2026: view Vtec terpasang di `tom`** (definer `vtecPOS@%`,
+> 13 kolom persis sesuai `PAYMENT_FIELDS`). Σ `PayAmount` view =
+> `ReceiptPayPrice` di 7 dari 7 hari (11–17 November). Uji alur agen tanggal
+> 17 November: 110 transaksi, 716 item, 110 baris `payments`, 0 transaksi
+> tanpa pembayaran, tanpa peringatan selisih, query payment 0,1 detik.
+> View Promise belum dipasang/diuji dengan alur agen. Build exe dan rilis
+> ke outlet juga belum.
 
 Semua perubahan mengikuti aturan `AGENTS.md` agen: query parameterized,
 hasilnya list of dict, dan agen tetap hanya membaca MySQL.
